@@ -1,4 +1,4 @@
-import { ALLOWED_ACTIONS, BANNED_ACTIONS } from "../constants.js";
+import { ALLOWED_ACTIONS, BANNED_ACTIONS, MAX_ACTIONS_PER_REQUEST } from "../constants.js";
 
 export const toolPlanSchema = {
   type: "object",
@@ -36,12 +36,16 @@ export const toolPlanSchema = {
   required: ["action", "params", "destructive", "reply"]
 } as const;
 
-export const buildSystemPrompt = (): string => {
+export const buildSystemPrompt = (lang: string | null | undefined): string => {
   const allowed = Array.from(ALLOWED_ACTIONS.values()).join(", ");
   const banned = Array.from(BANNED_ACTIONS.values()).join(", ");
+  const languageLine = lang === "ja"
+    ? "User-facing language: Japanese. Write all reply text in Japanese."
+    : "User-facing language: English. Write all reply text in English.";
 
   return [
     "You are a Discord server management assistant.",
+    languageLine,
     "Return ONLY JSON that matches the provided schema.",
     "Allowed actions: " + allowed + ".",
     "Never output banned actions: " + banned + ".",
@@ -50,11 +54,16 @@ export const buildSystemPrompt = (): string => {
     "Always keep reply concise and user-facing.",
     "Output example: {\"action\":\"none\",\"params\":{},\"destructive\":false,\"reply\":\"I can help if you rephrase.\"}",
     "Tool hints:",
+    "- Prefer using tools to inspect the guild instead of asking the user for IDs.",
+    "- list_channels params: type (text|voice|category|forum|any), name_contains (string), limit (number). Use this to find channel IDs/names.",
+    "- get_channel_details params: channel_id or channel_name (exact).",
     "- create_channel params: name (string, optional), type (text|voice|category|forum), parent_id, topic, user_limit (number, voice only).",
-    "- If channel name is missing, choose a sensible default (e.g., voice-room, text-channel) and mention it in reply.",
-    "- Voice channels only support a maximum user limit. If user gives a range for a single channel, set user_limit to the max and mention that minimum isn't supported.",
+    "- rename_channel params: channel_id or channel_name (exact), new_name.",
+    "- delete_channel params: channel_id or channel_name (exact).",
+    "- If a user asks to rename/delete without giving IDs, first call list_channels to locate targets. Ask a clarifying question only if multiple candidates exist.",
+    "- Voice channels only support a maximum user limit. If a user gives a range for a single channel, set user_limit to the max and mention that minimum isn't supported.",
     "- For multi-step requests, include an actions array of tool calls (and set top-level action/params to the first action).",
-    "- Keep total actions reasonable; if more than 12 actions are needed, ask the user to narrow or split the request.",
-    "- If a request explicitly asks for multiple channels across a range (e.g., \"2-10のVCをそれぞれ作って\"), expand into multiple actions with unique names like voice-room-2...voice-room-10."
+    `- Keep total actions <= ${MAX_ACTIONS_PER_REQUEST}; if more are needed, ask the user to split the request.`,
+    "- If a request explicitly asks for multiple channels across a range (e.g., \"2-10のVCをそれぞれ作って\"), expand into multiple actions with unique names like voice-room-2...voice-room-10. If the range intent is ambiguous, ask which interpretation they want."
   ].join("\n");
 };

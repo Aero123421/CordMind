@@ -28,6 +28,8 @@ import { db } from "../db.js";
 import { buildImpact, formatImpact, type Impact } from "../impact.js";
 import type { PlannedAction } from "../llm/types.js";
 
+const t = (lang: string | null | undefined, en: string, ja: string) => (lang === "ja" ? ja : en);
+
 const confirmationRow = (id: string) =>
   new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`confirm:${id}`).setLabel("Accept").setStyle(ButtonStyle.Success),
@@ -96,14 +98,14 @@ const notifyError = async (input: {
   });
 };
 
-const buildMessages = async (message: Message, initialSummary?: string | null) => {
+const buildMessages = async (message: Message, lang: string | null | undefined, initialSummary?: string | null) => {
   const thread = message.channel as ThreadChannel;
   const fetched = await thread.messages.fetch({ limit: 12 });
   const sorted = Array.from(fetched.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
   const systemContent = initialSummary
-    ? `${buildSystemPrompt()}\nInitial request: ${initialSummary}`
-    : buildSystemPrompt();
+    ? `${buildSystemPrompt(lang)}\n${t(lang, "Initial request", "初期依頼")}: ${initialSummary}`
+    : buildSystemPrompt(lang);
   const system = { role: "system" as const, content: systemContent };
   const history = sorted.map((msg) => ({
     role: msg.author.bot ? ("assistant" as const) : ("user" as const),
@@ -185,7 +187,7 @@ export const handleThreadMessage = async (message: Message) => {
     model
   });
 
-  const messages = await buildMessages(message, threadState?.summary ?? null);
+  const messages = await buildMessages(message, settings.language, threadState?.summary ?? null);
   let plan;
   try {
     plan = await generateToolPlan(adapter, messages);

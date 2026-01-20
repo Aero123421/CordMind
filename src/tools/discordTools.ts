@@ -51,12 +51,64 @@ const mapChannelType = (value?: string): ChannelType => {
 const ok = (message: string, ids?: string[]): ToolResult => ({ ok: true, message, discordIds: ids });
 const fail = (message: string): ToolResult => ({ ok: false, message });
 
-export const listChannels: ToolHandler = async (context) => {
+const parseNumber = (value: unknown, fallback: number): number => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+};
+
+const channelTypeLabel = (type: ChannelType): string => {
+  switch (type) {
+    case ChannelType.GuildText:
+      return "text";
+    case ChannelType.GuildVoice:
+      return "voice";
+    case ChannelType.GuildCategory:
+      return "category";
+    case ChannelType.GuildForum:
+      return "forum";
+    default:
+      return String(type);
+  }
+};
+
+const matchesType = (type: ChannelType, filter: string): boolean => {
+  const normalized = filter.toLowerCase();
+  if (normalized === "any") return true;
+  if (normalized === "text") return type === ChannelType.GuildText;
+  if (normalized === "voice") return type === ChannelType.GuildVoice;
+  if (normalized === "category") return type === ChannelType.GuildCategory;
+  if (normalized === "forum") return type === ChannelType.GuildForum;
+  return true;
+};
+
+export const listChannels: ToolHandler = async (context, params) => {
+  const typeFilter = (params.type as string | undefined) ?? "any";
+  const nameContains = (params.name_contains as string | undefined)?.toLowerCase() ?? "";
+  const limit = Math.min(50, Math.max(1, Math.floor(parseNumber(params.limit, 20))));
+
   const channels = await context.guild.channels.fetch();
   const list = channels
-    .filter((channel) => channel?.isTextBased())
-    .map((channel) => `#${channel?.name} (${channel?.id})`)
-    .slice(0, 20)
+    .filter((channel) => Boolean(channel))
+    .filter((channel) => matchesType(channel!.type, typeFilter))
+    .filter((channel) => (nameContains ? channel!.name.toLowerCase().includes(nameContains) : true))
+    .map((channel) => {
+      const typeLabel = channelTypeLabel(channel!.type);
+      const parentId = "parentId" in channel! && typeof channel!.parentId === "string" ? channel!.parentId : null;
+      const userLimit = "userLimit" in channel! && typeof (channel as unknown as { userLimit?: unknown }).userLimit === "number"
+        ? (channel as unknown as { userLimit: number }).userLimit
+        : null;
+      const extra = [
+        `type=${typeLabel}`,
+        parentId ? `parent_id=${parentId}` : null,
+        userLimit !== null ? `user_limit=${userLimit}` : null
+      ].filter(Boolean).join(" ");
+      return `#${channel?.name} (${channel?.id}) ${extra}`;
+    })
+    .slice(0, limit)
     .join("\n");
   return ok(list.length > 0 ? list : "No channels found.");
 };
