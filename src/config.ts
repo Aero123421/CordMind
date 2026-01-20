@@ -1,5 +1,10 @@
 import dotenv from "dotenv";
-import { DEFAULT_BASE_URLS, DEFAULT_AUDIT_RETENTION_DAYS, ProviderName } from "./constants.js";
+import {
+  DEFAULT_BASE_URLS,
+  DEFAULT_AUDIT_RETENTION_DAYS,
+  DEFAULT_MODEL_LISTS,
+  ProviderName
+} from "./constants.js";
 
 dotenv.config();
 
@@ -28,6 +33,11 @@ const parseBaseUrl = (provider: ProviderName, envName: string): string => {
   return optional(envName) ?? DEFAULT_BASE_URLS[provider];
 };
 
+const withDefaultModels = (provider: ProviderName, envName: string): string[] => {
+  const fromEnv = parseList(optional(envName));
+  return fromEnv.length > 0 ? fromEnv : DEFAULT_MODEL_LISTS[provider];
+};
+
 const parseNumber = (value?: string, fallback?: number): number => {
   if (!value) return fallback ?? 0;
   const parsed = Number(value);
@@ -52,11 +62,11 @@ export const config = {
     zai: parseBaseUrl("zai", "ZAI_BASE_URL")
   },
   providerModelLists: {
-    gemini: parseList(optional("GEMINI_MODELS")),
-    xai: parseList(optional("XAI_MODELS")),
-    groq: parseList(optional("GROQ_MODELS")),
-    cerebras: parseList(optional("CEREBRAS_MODELS")),
-    zai: parseList(optional("ZAI_MODELS"))
+    gemini: withDefaultModels("gemini", "GEMINI_MODELS"),
+    xai: withDefaultModels("xai", "XAI_MODELS"),
+    groq: withDefaultModels("groq", "GROQ_MODELS"),
+    cerebras: withDefaultModels("cerebras", "CEREBRAS_MODELS"),
+    zai: withDefaultModels("zai", "ZAI_MODELS")
   },
   auditRetentionDays: parseNumber(optional("AUDIT_RETENTION_DAYS"), DEFAULT_AUDIT_RETENTION_DAYS)
 };
