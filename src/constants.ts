@@ -11,7 +11,7 @@ export const DEFAULT_BASE_URLS: Record<ProviderName, string> = {
 
 export const DEFAULT_THREAD_ARCHIVE_MINUTES = 4320;
 export const DEFAULT_RATE_LIMIT_PER_MIN = 10;
-export const DESTRUCTIVE_LIMIT_PER_MIN = 2;
+export const DESTRUCTIVE_LIMIT_PER_MIN = 3;
 export const DEFAULT_AUDIT_RETENTION_DAYS = 7;
 export const MAX_ACTIONS_PER_REQUEST = 12;
 
@@ -85,7 +85,13 @@ export const ALLOWED_ACTIONS = new Set([
   "remove_role",
   "update_permission_overwrites",
   "get_guild_permissions",
-  "get_bot_permissions"
+  "get_bot_permissions",
+  "find_members",
+  "get_member_details",
+  "kick_member",
+  "ban_member",
+  "timeout_member",
+  "untimeout_member"
 ]);
 
 export const DESTRUCTIVE_ACTIONS = new Set([
@@ -93,12 +99,12 @@ export const DESTRUCTIVE_ACTIONS = new Set([
   "delete_role",
   "update_permission_overwrites",
   "remove_role",
-  "rename_channel"
+  "kick_member",
+  "ban_member",
+  "timeout_member",
+  "untimeout_member"
 ]);
 
 export const BANNED_ACTIONS = new Set([
-  "delete_guild",
-  "ban_member",
-  "kick_member",
-  "timeout_member"
+  "delete_guild"
 ]);

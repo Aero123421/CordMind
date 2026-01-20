@@ -5,7 +5,7 @@ import type { ChatMessage, ToolPlan, LLMAdapter } from "../llm/types.js";
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validate = ajv.compile(toolPlanSchema);
 
-const fallbackReply = "Failed to interpret the request. Please rephrase.";
+const defaultFallbackReply = "Failed to interpret the request. Please rephrase.";
 
 const tryParseJson = (raw: string): unknown => {
   try {
@@ -23,7 +23,7 @@ const tryParseJson = (raw: string): unknown => {
   }
 };
 
-const normalizePlan = (input: unknown) => {
+const normalizePlan = (input: unknown, fallbackReply: string) => {
   const emptyParams: Record<string, unknown> = {};
   const base = {
     action: "none",
@@ -72,14 +72,18 @@ const normalizePlan = (input: unknown) => {
   return reason ? { ...normalized, reason } : normalized;
 };
 
-export const generateToolPlan = async (adapter: LLMAdapter, messages: ChatMessage[]): Promise<ToolPlan> => {
+export const generateToolPlan = async (
+  adapter: LLMAdapter,
+  messages: ChatMessage[],
+  options?: { fallbackReply?: string }
+): Promise<ToolPlan> => {
   const raw = await adapter.generatePlan(messages, toolPlanSchema);
   const parsed = tryParseJson(raw);
   if (!parsed) {
     throw new Error("LLM did not return valid JSON");
   }
 
-  const normalized = normalizePlan(parsed);
+  const normalized = normalizePlan(parsed, options?.fallbackReply ?? defaultFallbackReply);
   if (!validate(normalized)) {
     const errorText = validate.errors?.map((err: { instancePath?: string; message?: string }) => `${err.instancePath ?? ""} ${err.message ?? ""}`).join("; ");
     throw new Error(`LLM output failed schema validation: ${errorText}`);

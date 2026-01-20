@@ -28,6 +28,17 @@ const formatMember = (tag: string | null | undefined, id?: string | null) => {
   return undefined;
 };
 
+const extractId = (value: unknown, pattern: RegExp): string | null => {
+  if (typeof value !== "string") return null;
+  const match = value.match(pattern);
+  if (match?.[1]) return match[1];
+  if (/^\d+$/.test(value)) return value;
+  return null;
+};
+
+const extractUserId = (value: unknown): string | null => extractId(value, /<@!?(\d+)>/);
+const extractRoleId = (value: unknown): string | null => extractId(value, /<@&(\d+)>/);
+
 const resolveChannel = async (guild: Guild, id?: string, name?: string) => {
   if (id) return guild.channels.fetch(id);
   if (name) {
@@ -56,9 +67,9 @@ export const buildImpact = async (guild: Guild, action: string, params: Record<s
 
   const channelId = params.channel_id as string | undefined;
   const channelName = params.channel_name as string | undefined;
-  const roleId = params.role_id as string | undefined;
+  const roleId = extractRoleId(params.role_id) ?? (params.role_id as string | undefined);
   const roleName = params.role_name as string | undefined;
-  const userId = params.user_id as string | undefined;
+  const userId = extractUserId(params.user_id) ?? extractUserId(params.user_mention) ?? (params.user_id as string | undefined);
 
   if (["delete_channel", "rename_channel", "update_permission_overwrites"].includes(action)) {
     const channel = await resolveChannel(guild, channelId, channelName);
@@ -72,7 +83,7 @@ export const buildImpact = async (guild: Guild, action: string, params: Record<s
     if (formatted) impact.roles = [formatted];
   }
 
-  if (["assign_role", "remove_role"].includes(action)) {
+  if (["assign_role", "remove_role", "kick_member", "ban_member", "timeout_member", "untimeout_member"].includes(action)) {
     const member = await resolveMember(guild, userId);
     const formatted = formatMember(member?.user.tag ?? null, member?.id ?? userId);
     if (formatted) impact.members = [formatted];
@@ -109,20 +120,20 @@ export const buildImpact = async (guild: Guild, action: string, params: Record<s
   return impact;
 };
 
-export const formatImpact = (impact: Impact): string => {
+export const formatImpact = (impact: Impact, lang?: string | null): string => {
   const lines: string[] = [];
   if (impact.channels && impact.channels.length > 0) {
-    lines.push(`channels: ${impact.channels.join(", ")}`);
+    lines.push(`${lang === "ja" ? "チャンネル" : "channels"}: ${impact.channels.join(", ")}`);
   }
   if (impact.roles && impact.roles.length > 0) {
-    lines.push(`roles: ${impact.roles.join(", ")}`);
+    lines.push(`${lang === "ja" ? "ロール" : "roles"}: ${impact.roles.join(", ")}`);
   }
   if (impact.members && impact.members.length > 0) {
-    lines.push(`members: ${impact.members.join(", ")}`);
+    lines.push(`${lang === "ja" ? "メンバー" : "members"}: ${impact.members.join(", ")}`);
   }
   if (impact.permissions && impact.permissions.length > 0) {
-    lines.push(`permissions: ${impact.permissions.join(", ")}`);
+    lines.push(`${lang === "ja" ? "権限" : "permissions"}: ${impact.permissions.join(", ")}`);
   }
 
-  return lines.length > 0 ? lines.join("\n") : "(no impact details)";
+  return lines.length > 0 ? lines.join("\n") : lang === "ja" ? "(影響範囲なし)" : "(no impact details)";
 };

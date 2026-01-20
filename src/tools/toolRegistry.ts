@@ -15,7 +15,13 @@ import {
   removeRole,
   updatePermissionOverwrites,
   getGuildPermissions,
-  getBotPermissions
+  getBotPermissions,
+  findMembers,
+  getMemberDetails,
+  kickMember,
+  banMember,
+  timeoutMember,
+  untimeoutMember
 } from "./discordTools.js";
 
 export const toolRegistry: Record<string, ToolHandler> = {
@@ -34,5 +40,11 @@ export const toolRegistry: Record<string, ToolHandler> = {
   remove_role: removeRole,
   update_permission_overwrites: updatePermissionOverwrites,
   get_guild_permissions: getGuildPermissions,
-  get_bot_permissions: getBotPermissions
+  get_bot_permissions: getBotPermissions,
+  find_members: findMembers,
+  get_member_details: getMemberDetails,
+  kick_member: kickMember,
+  ban_member: banMember,
+  timeout_member: timeoutMember,
+  untimeout_member: untimeoutMember
 };

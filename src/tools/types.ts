@@ -4,6 +4,7 @@ export type ToolContext = {
   client: Client;
   guild: Guild;
   actor: User;
+  lang: string | null | undefined;
 };
 
 export type ToolResult = {

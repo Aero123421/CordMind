@@ -16,6 +16,7 @@ import { isAuthorized } from "./permissions.js";
 import { upsertThreadState } from "./conversation/threadState.js";
 import { cleanupAuditEvents } from "./audit.js";
 import { sendAuditLog } from "./auditLog.js";
+import { t } from "./i18n.js";
 
 const client = new Client({
   intents: [
@@ -87,7 +88,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
   } catch (error) {
     logger.error({ error }, "Interaction handling failed");
     if (interaction.isRepliable()) {
-      await interaction.reply({ ephemeral: true, content: "An error occurred." });
+      let lang: string | null | undefined = "en";
+      try {
+        if (interaction.guildId) {
+          lang = (await getGuildSettings(interaction.guildId)).language;
+        }
+      } catch {
+        // ignore
+      }
+      await interaction.reply({ ephemeral: true, content: t(lang, "An error occurred.", "エラーが発生しました。") });
     }
   }
 });
@@ -108,7 +117,7 @@ client.on(Events.MessageCreate, async (message) => {
   const member = await message.guild.members.fetch(message.author.id);
   const settings = await getGuildSettings(message.guild.id);
   if (!isAuthorized(member, settings.manager_role_id)) {
-    await message.reply("Not authorized to use this bot.");
+    await message.reply(t(settings.language, "Not authorized to use this bot.", "このBotを使用する権限がありません。"));
     return;
   }
 
@@ -129,12 +138,10 @@ client.on(Events.MessageCreate, async (message) => {
       summary: cleaned.length > 0 ? cleaned : null
     });
 
-    await thread.send(
-      "Thread created. You can continue here without mentioning me."
-    );
+    await thread.send(t(settings.language, "Thread created. You can continue here without mentioning me.", "スレッドを作成しました。このスレッド内ではメンション不要で続けられます。"));
   } catch (error) {
     logger.error({ error }, "Failed to create thread");
-    await message.reply("Failed to create a thread. Please check permissions.");
+    await message.reply(t(settings.language, "Failed to create a thread. Please check permissions.", "スレッドの作成に失敗しました。Botの権限を確認してください。"));
     if (settings.log_channel_id) {
       await sendAuditLog(message.guild, settings.log_channel_id, {
         action: "thread_create_failed",
