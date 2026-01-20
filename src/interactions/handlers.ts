@@ -6,8 +6,16 @@ import {
   ActionRowBuilder
 } from "discord.js";
 import { config } from "../config.js";
-import { getGuildSettings, updateGuildSettings, setProviderCredentials, hasProviderCredentials } from "../settings.js";
+import {
+  getGuildSettings,
+  updateGuildSettings,
+  setProviderCredentials,
+  hasProviderCredentials,
+  clearProviderCredentials
+} from "../settings.js";
 import { ProviderName } from "../constants.js";
+import { createAuditEvent } from "../audit.js";
+import { sendAuditLog } from "../auditLog.js";
 
 const API_MODAL_ID = "discordai-api-modal";
 const API_INPUT_ID = "discordai-api-input";
@@ -46,6 +54,38 @@ export const handleCommand = async (interaction: ChatInputCommandInteraction) =>
   }
 
   if (subcommand === "api") {
+    const shouldClear = interaction.options.getBoolean("clear") ?? false;
+    if (shouldClear) {
+      await clearProviderCredentials(interaction.guildId, settings.provider as ProviderName);
+      await createAuditEvent({
+        action: "api_key_cleared",
+        actor_user_id: interaction.user.id,
+        guild_id: interaction.guildId,
+        target_id: null,
+        payload: {
+          request: { action: "api_key_cleared", params: { provider: settings.provider } },
+          impact: {}
+        },
+        confirmation_required: false,
+        confirmation_status: "none",
+        status: "success",
+        error_message: null
+      });
+
+      if (settings.log_channel_id && interaction.guild) {
+        await sendAuditLog(interaction.guild, settings.log_channel_id, {
+          action: "api_key_cleared",
+          actorTag: interaction.user.tag,
+          status: "success",
+          confirmation: "none",
+          message: `API key cleared for provider ${settings.provider}.`
+        });
+      }
+
+      await interaction.reply({ ephemeral: true, content: "API key cleared." });
+      return;
+    }
+
     const modal = new ModalBuilder().setCustomId(API_MODAL_ID).setTitle("Set API Key");
     const input = new TextInputBuilder()
       .setCustomId(API_INPUT_ID)
@@ -118,5 +158,29 @@ export const handleApiModal = async (interaction: import("discord.js").ModalSubm
   const settings = await getGuildSettings(interaction.guildId);
   const provider = settings.provider as ProviderName;
   await setProviderCredentials(interaction.guildId, provider, apiKey);
+  await createAuditEvent({
+    action: "api_key_set",
+    actor_user_id: interaction.user.id,
+    guild_id: interaction.guildId,
+    target_id: null,
+    payload: {
+      request: { action: "api_key_set", params: { provider } },
+      impact: {}
+    },
+    confirmation_required: false,
+    confirmation_status: "none",
+    status: "success",
+    error_message: null
+  });
+
+  if (settings.log_channel_id && interaction.guild) {
+    await sendAuditLog(interaction.guild, settings.log_channel_id, {
+      action: "api_key_set",
+      actorTag: interaction.user.tag,
+      status: "success",
+      confirmation: "none",
+      message: `API key saved for provider ${provider}.`
+    });
+  }
   await interaction.reply({ ephemeral: true, content: `API key saved for provider ${provider}.` });
 };

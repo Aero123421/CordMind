@@ -16,7 +16,14 @@ export const buildCommands = () => {
           opt.setName("name").setDescription("Provider name").setRequired(true).addChoices(...providerChoices)
         )
     )
-    .addSubcommand((sub) => sub.setName("api").setDescription("Set or reset API key"))
+    .addSubcommand((sub) =>
+      sub
+        .setName("api")
+        .setDescription("Set, reset, or clear API key")
+        .addBooleanOption((opt) =>
+          opt.setName("clear").setDescription("Clear API key for current provider").setRequired(false)
+        )
+    )
     .addSubcommand((sub) =>
       sub
         .setName("model")

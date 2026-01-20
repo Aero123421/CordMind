@@ -58,6 +58,12 @@ export const setProviderCredentials = async (guildId: string, provider: Provider
   });
 };
 
+export const clearProviderCredentials = async (guildId: string, provider: ProviderName) => {
+  return db.providerCredentials.deleteMany({
+    where: { guild_id: guildId, provider }
+  });
+};
+
 export const getDecryptedApiKey = async (guildId: string, provider: ProviderName): Promise<string | null> => {
   const creds = await getProviderCredentials(guildId, provider);
   if (!creds) return null;

@@ -32,6 +32,23 @@ const summarizePlan = (plan: { action: string; params: Record<string, unknown> }
   return `Action: ${plan.action}\nParams:\n${paramText}`;
 };
 
+const notifyError = async (input: {
+  guild: import("discord.js").Guild;
+  logChannelId?: string | null;
+  actorTag: string;
+  action: string;
+  message: string;
+}) => {
+  if (!input.logChannelId) return;
+  await sendAuditLog(input.guild, input.logChannelId, {
+    action: input.action,
+    actorTag: input.actorTag,
+    status: "failure",
+    confirmation: "none",
+    message: input.message
+  });
+};
+
 const buildMessages = async (message: Message, initialSummary?: string | null) => {
   const thread = message.channel as ThreadChannel;
   const fetched = await thread.messages.fetch({ limit: 12 });
@@ -55,6 +72,13 @@ export const handleThreadMessage = async (message: Message) => {
 
   if (message.content.trim().length === 0) {
     await message.reply("Message content is empty. Ensure Message Content Intent is enabled.");
+    await notifyError({
+      guild: message.guild,
+      logChannelId: (await getGuildSettings(message.guild.id)).log_channel_id,
+      actorTag: message.author.tag,
+      action: "message_content_empty",
+      message: "Message content empty; Message Content Intent may be disabled."
+    });
     return;
   }
 
@@ -72,18 +96,39 @@ export const handleThreadMessage = async (message: Message) => {
 
   if (!checkRateLimit(guildId, settings.rate_limit_per_min)) {
     await message.reply("Rate limit exceeded. Try again later.");
+    await notifyError({
+      guild: message.guild,
+      logChannelId: settings.log_channel_id,
+      actorTag: message.author.tag,
+      action: "rate_limit",
+      message: "Rate limit exceeded."
+    });
     return;
   }
 
   const apiKey = await getDecryptedApiKey(guildId, settings.provider as ProviderName);
   if (!apiKey) {
     await message.reply("API key not set. Use /discordaimanage api to configure.");
+    await notifyError({
+      guild: message.guild,
+      logChannelId: settings.log_channel_id,
+      actorTag: message.author.tag,
+      action: "api_key_missing",
+      message: `API key missing for provider ${settings.provider}.`
+    });
     return;
   }
 
   const model = settings.model ?? "";
   if (!model) {
     await message.reply("Model not set. Use /discordaimanage model to configure.");
+    await notifyError({
+      guild: message.guild,
+      logChannelId: settings.log_channel_id,
+      actorTag: message.author.tag,
+      action: "model_missing",
+      message: "Model not set."
+    });
     return;
   }
 
@@ -98,18 +143,49 @@ export const handleThreadMessage = async (message: Message) => {
   try {
     plan = await generateToolPlan(adapter, messages);
   } catch (error) {
-    logger.error({ error }, "LLM planning failed");
-    await message.reply("Failed to interpret the request. Please rephrase.");
-    return;
+    logger.warn({ error }, "LLM planning failed, retrying once");
+    try {
+      const retryMessages = [...messages];
+      retryMessages.splice(1, 0, {
+        role: "system" as const,
+        content: "Return only valid JSON that matches the schema. No markdown or extra text."
+      });
+      plan = await generateToolPlan(adapter, retryMessages);
+    } catch (retryError) {
+      logger.error({ retryError }, "LLM planning failed");
+      await message.reply("Failed to interpret the request. Please rephrase.");
+      await notifyError({
+        guild: message.guild,
+        logChannelId: settings.log_channel_id,
+        actorTag: message.author.tag,
+        action: "llm_plan_failed",
+        message: "LLM failed to produce a valid plan."
+      });
+      return;
+    }
   }
 
   if (!ALLOWED_ACTIONS.has(plan.action)) {
     await message.reply("Requested action is not allowed.");
+    await notifyError({
+      guild: message.guild,
+      logChannelId: settings.log_channel_id,
+      actorTag: message.author.tag,
+      action: "action_not_allowed",
+      message: `Action not allowed: ${plan.action}`
+    });
     return;
   }
 
   if (BANNED_ACTIONS.has(plan.action)) {
     await message.reply("This action is forbidden.");
+    await notifyError({
+      guild: message.guild,
+      logChannelId: settings.log_channel_id,
+      actorTag: message.author.tag,
+      action: "action_forbidden",
+      message: `Action forbidden: ${plan.action}`
+    });
     return;
   }
 
@@ -128,6 +204,13 @@ export const handleThreadMessage = async (message: Message) => {
   if (destructive) {
     if (!checkRateLimit(`destructive:${guildId}`, DESTRUCTIVE_LIMIT_PER_MIN)) {
       await message.reply("Destructive action rate limit exceeded. Try again later.");
+      await notifyError({
+        guild: message.guild,
+        logChannelId: settings.log_channel_id,
+        actorTag: message.author.tag,
+        action: "rate_limit_destructive",
+        message: "Destructive action rate limit exceeded."
+      });
       return;
     }
 
@@ -162,6 +245,13 @@ export const handleThreadMessage = async (message: Message) => {
   const handler = toolRegistry[plan.action];
   if (!handler) {
     await message.reply("Tool not implemented.");
+    await notifyError({
+      guild: message.guild,
+      logChannelId: settings.log_channel_id,
+      actorTag: message.author.tag,
+      action: "tool_missing",
+      message: `Tool not implemented: ${plan.action}`
+    });
     return;
   }
 
@@ -171,6 +261,13 @@ export const handleThreadMessage = async (message: Message) => {
   } catch (error) {
     logger.error({ error }, "Tool execution failed");
     result = { ok: false, message: "Tool execution failed." };
+    await notifyError({
+      guild: message.guild,
+      logChannelId: settings.log_channel_id,
+      actorTag: message.author.tag,
+      action: "tool_execution_failed",
+      message: `Tool execution failed: ${plan.action}`
+    });
   }
 
   if (result.ok) {

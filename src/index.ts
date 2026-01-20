@@ -15,6 +15,7 @@ import { getGuildSettings } from "./settings.js";
 import { isAuthorized } from "./permissions.js";
 import { upsertThreadState } from "./conversation/threadState.js";
 import { cleanupAuditEvents } from "./audit.js";
+import { sendAuditLog } from "./auditLog.js";
 
 const client = new Client({
   intents: [
@@ -104,7 +105,8 @@ client.on(Events.MessageCreate, async (message) => {
   try {
     const cleaned = message.content.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
     const date = new Date();
-    const threadName = `discord-ai | ${message.author.username} | ${date.toISOString().slice(0, 10)}`;
+    const topic = cleaned.length > 0 ? cleaned.replace(/\s+/g, " ").slice(0, 30) : "request";
+    const threadName = `discord-ai | ${message.author.username} | ${topic} | ${date.toISOString().slice(0, 10)}`.slice(0, 100);
     const thread = await message.startThread({
       name: threadName,
       autoArchiveDuration: settings.thread_archive_minutes
@@ -123,6 +125,15 @@ client.on(Events.MessageCreate, async (message) => {
   } catch (error) {
     logger.error({ error }, "Failed to create thread");
     await message.reply("Failed to create a thread. Please check permissions.");
+    if (settings.log_channel_id) {
+      await sendAuditLog(message.guild, settings.log_channel_id, {
+        action: "thread_create_failed",
+        actorTag: message.author.tag,
+        status: "failure",
+        confirmation: "none",
+        message: "Thread creation failed."
+      });
+    }
   }
 });
 
