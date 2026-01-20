@@ -14,6 +14,7 @@ import { handleThreadMessage, handleConfirmation } from "./conversation/handler.
 import { getGuildSettings } from "./settings.js";
 import { isAuthorized } from "./permissions.js";
 import { upsertThreadState } from "./conversation/threadState.js";
+import { cleanupAuditEvents } from "./audit.js";
 
 const client = new Client({
   intents: [
@@ -43,6 +44,17 @@ client.once(Events.ClientReady, async () => {
     await registerCommands();
   } catch (error) {
     logger.error({ error }, "Failed to register commands");
+  }
+
+  try {
+    const result = await cleanupAuditEvents(config.auditRetentionDays);
+    logger.info({ deleted: result.count }, "Audit log cleanup complete");
+    setInterval(async () => {
+      const cleanupResult = await cleanupAuditEvents(config.auditRetentionDays);
+      logger.info({ deleted: cleanupResult.count }, "Audit log cleanup complete");
+    }, 24 * 60 * 60 * 1000);
+  } catch (error) {
+    logger.error({ error }, "Audit log cleanup failed");
   }
 });
 

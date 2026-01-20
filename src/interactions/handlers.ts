@@ -87,6 +87,13 @@ export const handleCommand = async (interaction: ChatInputCommandInteraction) =>
     return;
   }
 
+  if (subcommand === "rate") {
+    const limit = interaction.options.getInteger("limit", true);
+    await updateGuildSettings(interaction.guildId, { rate_limit_per_min: limit });
+    await interaction.reply({ ephemeral: true, content: `Rate limit per minute set to ${limit}.` });
+    return;
+  }
+
   if (subcommand === "show") {
     const hasKey = await hasProviderCredentials(interaction.guildId, settings.provider as ProviderName);
     await interaction.reply({

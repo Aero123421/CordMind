@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { DEFAULT_BASE_URLS, ProviderName } from "./constants.js";
+import { DEFAULT_BASE_URLS, DEFAULT_AUDIT_RETENTION_DAYS, ProviderName } from "./constants.js";
 
 dotenv.config();
 
@@ -28,6 +28,12 @@ const parseBaseUrl = (provider: ProviderName, envName: string): string => {
   return optional(envName) ?? DEFAULT_BASE_URLS[provider];
 };
 
+const parseNumber = (value?: string, fallback?: number): number => {
+  if (!value) return fallback ?? 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback ?? 0;
+};
+
 const encryptionKeyBase64 = required("DISCORDAI_ENCRYPTION_KEY");
 
 export const config = {
@@ -51,5 +57,6 @@ export const config = {
     groq: parseList(optional("GROQ_MODELS")),
     cerebras: parseList(optional("CEREBRAS_MODELS")),
     zai: parseList(optional("ZAI_MODELS"))
-  }
+  },
+  auditRetentionDays: parseNumber(optional("AUDIT_RETENTION_DAYS"), DEFAULT_AUDIT_RETENTION_DAYS)
 };

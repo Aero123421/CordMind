@@ -52,6 +52,17 @@ export const buildCommands = () => {
             .setRequired(true)
         )
     )
+    .addSubcommand((sub) =>
+      sub
+        .setName("rate")
+        .setDescription("Set rate limit per minute")
+        .addIntegerOption((opt) =>
+          opt
+            .setName("limit")
+            .setDescription("Operations per minute")
+            .setRequired(true)
+        )
+    )
     .addSubcommand((sub) => sub.setName("show").setDescription("Show current settings"));
 
   return [command.toJSON()];

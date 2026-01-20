@@ -18,6 +18,8 @@ import { sendAuditLog } from "../auditLog.js";
 import { getThreadState } from "./threadState.js";
 import { isAuthorized } from "../permissions.js";
 import { db } from "../db.js";
+import { DESTRUCTIVE_LIMIT_PER_MIN } from "../constants.js";
+import { buildImpact, formatImpact } from "../impact.js";
 
 const confirmationRow = (id: string) =>
   new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -50,6 +52,11 @@ const buildMessages = async (message: Message, initialSummary?: string | null) =
 export const handleThreadMessage = async (message: Message) => {
   if (!message.guild || !(message.channel instanceof ThreadChannel)) return;
   if (message.author.bot) return;
+
+  if (message.content.trim().length === 0) {
+    await message.reply("Message content is empty. Ensure Message Content Intent is enabled.");
+    return;
+  }
 
   const settings = await getGuildSettings(message.guild.id);
   const guildId = message.guild.id;
@@ -112,12 +119,18 @@ export const handleThreadMessage = async (message: Message) => {
   }
 
   const destructive = plan.destructive || DESTRUCTIVE_ACTIONS.has(plan.action);
+  const impact = destructive ? await buildImpact(message.guild, plan.action, plan.params) : {};
   const payload: AuditPayload = {
     request: { action: plan.action, params: plan.params, raw_text: message.content, thread_id: message.channel.id },
-    impact: {}
+    impact
   };
 
   if (destructive) {
+    if (!checkRateLimit(`destructive:${guildId}`, DESTRUCTIVE_LIMIT_PER_MIN)) {
+      await message.reply("Destructive action rate limit exceeded. Try again later.");
+      return;
+    }
+
     const audit = await createAuditEvent({
       action: plan.action,
       actor_user_id: message.author.id,
@@ -140,7 +153,7 @@ export const handleThreadMessage = async (message: Message) => {
     }
 
     await message.reply({
-      content: `${plan.reply}\n\n${summarizePlan(plan)}\n\nAccept or Reject?`,
+      content: `${plan.reply}\n\n操作内容:\n${summarizePlan(plan)}\n\n影響範囲:\n${formatImpact(impact)}\n\nAccept or Reject?`,
       components: [confirmationRow(audit.id)]
     });
     return;
@@ -166,8 +179,7 @@ export const handleThreadMessage = async (message: Message) => {
     await message.reply(`Failed: ${result.message}`);
   }
 
-  const shouldLog = !result.ok;
-  if (shouldLog) {
+  if (!result.ok) {
     await createAuditEvent({
       action: plan.action,
       actor_user_id: message.author.id,
@@ -176,8 +188,8 @@ export const handleThreadMessage = async (message: Message) => {
       payload: { ...payload, result: { ok: result.ok, message: result.message, discord_ids: result.discordIds } },
       confirmation_required: false,
       confirmation_status: "none",
-      status: result.ok ? "success" : "failure",
-      error_message: result.ok ? null : result.message
+      status: "failure",
+      error_message: result.message
     });
   }
 
@@ -221,6 +233,15 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
 
   if (action === "reject") {
     await updateAuditEvent(id, { confirmation_status: "rejected", status: "failure", error_message: "Rejected" });
+    if (settings.log_channel_id) {
+      await sendAuditLog(interaction.guild, settings.log_channel_id, {
+        action: record.action,
+        actorTag: interaction.user.tag,
+        status: "failure",
+        confirmation: "rejected",
+        message: "Rejected by user"
+      });
+    }
     await interaction.reply({ content: "Rejected." });
     return;
   }
@@ -251,6 +272,16 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
     error_message: result.ok ? null : result.message,
     payload_json: { ...payload, result: { ok: result.ok, message: result.message, discord_ids: result.discordIds } }
   });
+
+  if (settings.log_channel_id) {
+    await sendAuditLog(interaction.guild, settings.log_channel_id, {
+      action: record.action,
+      actorTag: interaction.user.tag,
+      status: result.ok ? "success" : "failure",
+      confirmation: "approved",
+      message: result.message
+    });
+  }
 
   await interaction.reply({ content: result.ok ? `Done: ${result.message}` : `Failed: ${result.message}` });
 };

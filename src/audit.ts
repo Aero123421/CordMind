@@ -61,4 +61,16 @@ export const updateAuditEvent = async (
   });
 };
 
+export const cleanupAuditEvents = async (retentionDays: number) => {
+  if (retentionDays <= 0) return { count: 0 };
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+  return db.auditEvent.deleteMany({
+    where: {
+      created_at: {
+        lt: cutoff
+      }
+    }
+  });
+};
+
 export type { AuditPayload };

@@ -85,6 +85,49 @@ export const createChannel: ToolHandler = async (context, params) => {
   return ok(`Channel created: ${channel.name}`, [channel.id]);
 };
 
+export const createThread: ToolHandler = async (context, params) => {
+  const channel = await resolveChannel(
+    context.guild,
+    params.channel_id as string | undefined,
+    params.channel_name as string | undefined
+  );
+  if (!channel || !channel.isTextBased()) return fail("Channel not found or not text-based.");
+
+  const name = (params.name as string | undefined) ?? `thread-${Date.now()}`;
+  const autoArchiveDuration = params.auto_archive_minutes as number | undefined;
+  const messageId = params.message_id as string | undefined;
+
+  if ("threads" in channel) {
+    if (messageId && "messages" in channel) {
+      const message = await channel.messages.fetch(messageId);
+      const thread = await message.startThread({ name, autoArchiveDuration });
+      return ok(`Thread created: ${thread.name}.`, [thread.id]);
+    }
+    const thread = await channel.threads.create({ name, autoArchiveDuration });
+    return ok(`Thread created: ${thread.name}.`, [thread.id]);
+  }
+
+  return fail("Channel does not support threads.");
+};
+
+export const pinMessage: ToolHandler = async (context, params) => {
+  const messageId = params.message_id as string | undefined;
+  if (!messageId) return fail("Missing message_id.");
+
+  const channel = await resolveChannel(
+    context.guild,
+    params.channel_id as string | undefined,
+    params.channel_name as string | undefined
+  );
+  if (!channel || !channel.isTextBased() || !("messages" in channel)) {
+    return fail("Channel not found or not text-based.");
+  }
+
+  const message = await channel.messages.fetch(messageId);
+  await message.pin();
+  return ok("Message pinned.", [message.id]);
+};
+
 export const renameChannel: ToolHandler = async (context, params) => {
   const channel = await resolveChannel(
     context.guild,

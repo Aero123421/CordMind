@@ -10,6 +10,9 @@ export const DEFAULT_BASE_URLS: Record<ProviderName, string> = {
 };
 
 export const DEFAULT_THREAD_ARCHIVE_MINUTES = 4320;
+export const DEFAULT_RATE_LIMIT_PER_MIN = 10;
+export const DESTRUCTIVE_LIMIT_PER_MIN = 2;
+export const DEFAULT_AUDIT_RETENTION_DAYS = 7;
 
 export const ALLOWED_ACTIONS = new Set([
   "none",
@@ -18,6 +21,8 @@ export const ALLOWED_ACTIONS = new Set([
   "create_channel",
   "rename_channel",
   "delete_channel",
+  "create_thread",
+  "pin_message",
   "list_roles",
   "get_role_details",
   "create_role",

@@ -1,7 +1,7 @@
 import { db } from "./db.js";
 import { config } from "./config.js";
 import { decrypt, encrypt } from "./encryption.js";
-import { DEFAULT_THREAD_ARCHIVE_MINUTES, ProviderName } from "./constants.js";
+import { DEFAULT_THREAD_ARCHIVE_MINUTES, DEFAULT_RATE_LIMIT_PER_MIN, ProviderName } from "./constants.js";
 
 export type GuildSettings = Awaited<ReturnType<typeof getGuildSettings>>;
 
@@ -19,7 +19,7 @@ export const getGuildSettings = async (guildId: string) => {
       manager_role_id: null,
       thread_policy: "auto-create",
       thread_archive_minutes: DEFAULT_THREAD_ARCHIVE_MINUTES,
-      rate_limit_per_min: 10
+      rate_limit_per_min: DEFAULT_RATE_LIMIT_PER_MIN
     }
   });
 };
