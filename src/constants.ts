@@ -13,6 +13,7 @@ export const DEFAULT_THREAD_ARCHIVE_MINUTES = 4320;
 export const DEFAULT_RATE_LIMIT_PER_MIN = 10;
 export const DESTRUCTIVE_LIMIT_PER_MIN = 2;
 export const DEFAULT_AUDIT_RETENTION_DAYS = 7;
+export const MAX_ACTIONS_PER_REQUEST = 12;
 
 export const DEFAULT_MODEL_LISTS: Record<ProviderName, string[]> = {
   gemini: [

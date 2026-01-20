@@ -24,25 +24,52 @@ const tryParseJson = (raw: string): unknown => {
 };
 
 const normalizePlan = (input: unknown) => {
+  const emptyParams: Record<string, unknown> = {};
   const base = {
     action: "none",
-    params: {},
+    params: emptyParams,
     destructive: false,
     reply: fallbackReply
   };
 
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return base;
+    return { ...base, actions: [base] };
   }
 
   const obj = input as Record<string, unknown>;
-  const action = typeof obj.action === "string" ? obj.action : base.action;
-  const params = obj.params && typeof obj.params === "object" && !Array.isArray(obj.params) ? obj.params : base.params;
-  const destructive = typeof obj.destructive === "boolean" ? obj.destructive : base.destructive;
   const reply = typeof obj.reply === "string" && obj.reply.trim().length > 0 ? obj.reply : base.reply;
   const reason = typeof obj.reason === "string" ? obj.reason : undefined;
 
-  return reason ? { action, params, destructive, reply, reason } : { action, params, destructive, reply };
+  const normalizeAction = (raw: unknown) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const item = raw as Record<string, unknown>;
+    const action = typeof item.action === "string" ? item.action : undefined;
+    if (!action) return null;
+    const params =
+      item.params && typeof item.params === "object" && !Array.isArray(item.params)
+        ? (item.params as Record<string, unknown>)
+        : emptyParams;
+    const destructive = typeof item.destructive === "boolean" ? item.destructive : false;
+    return { action, params, destructive };
+  };
+
+  const actionsRaw = Array.isArray(obj.actions) ? obj.actions : [];
+  const actions = actionsRaw.map(normalizeAction).filter((item): item is { action: string; params: Record<string, unknown>; destructive: boolean } => Boolean(item));
+
+  const primary = normalizeAction(obj) ?? actions[0] ?? base;
+  if (actions.length === 0) {
+    actions.push(primary);
+  }
+
+  const normalized = {
+    action: primary.action,
+    params: primary.params,
+    destructive: primary.destructive,
+    reply,
+    actions
+  };
+
+  return reason ? { ...normalized, reason } : normalized;
 };
 
 export const generateToolPlan = async (adapter: LLMAdapter, messages: ChatMessage[]): Promise<ToolPlan> => {

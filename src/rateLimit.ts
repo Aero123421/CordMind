@@ -18,3 +18,12 @@ export const checkRateLimit = (key: string, limit: number): boolean => {
   current.count += 1;
   return true;
 };
+
+export const getRateLimitRemaining = (key: string, limit: number): number => {
+  const now = Date.now();
+  const current = state.get(key);
+  if (!current || now > current.resetAt) {
+    return limit;
+  }
+  return Math.max(0, limit - current.count);
+};

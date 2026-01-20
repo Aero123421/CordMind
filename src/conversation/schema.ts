@@ -18,6 +18,19 @@ export const toolPlanSchema = {
     },
     reason: {
       type: "string"
+    },
+    actions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          action: { type: "string" },
+          params: { type: "object" },
+          destructive: { type: "boolean" }
+        },
+        required: ["action", "params"]
+      }
     }
   },
   required: ["action", "params", "destructive", "reply"]
@@ -39,6 +52,8 @@ export const buildSystemPrompt = (): string => {
     "Tool hints:",
     "- create_channel params: name (string, optional), type (text|voice|category|forum), parent_id, topic, user_limit (number, voice only).",
     "- If channel name is missing, choose a sensible default (e.g., voice-room, text-channel) and mention it in reply.",
-    "- Voice channels only support a maximum user limit. If user gives a range like 2-10, set user_limit=10 and mention that minimum isn't supported."
+    "- Voice channels only support a maximum user limit. If user gives a range like 2-10, set user_limit=10 and mention that minimum isn't supported.",
+    "- For multi-step requests, include an actions array of tool calls (and set top-level action/params to the first action).",
+    "- Keep total actions reasonable; if more than 12 actions are needed, ask the user to narrow or split the request."
   ].join("\n");
 };

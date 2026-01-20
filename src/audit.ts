@@ -5,6 +5,7 @@ type AuditPayload = {
   request: {
     action: string;
     params: Record<string, unknown>;
+    actions?: Array<{ action: string; params: Record<string, unknown> }>;
     raw_text?: string;
     thread_id?: string;
   };

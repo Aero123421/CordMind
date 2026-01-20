@@ -9,17 +9,24 @@ import { buildSystemPrompt } from "./schema.js";
 import { generateToolPlan } from "./plan.js";
 import { getGuildSettings, getDecryptedApiKey } from "../settings.js";
 import { createAdapter } from "../llm/providerFactory.js";
-import { ALLOWED_ACTIONS, BANNED_ACTIONS, DESTRUCTIVE_ACTIONS, ProviderName } from "../constants.js";
+import {
+  ALLOWED_ACTIONS,
+  BANNED_ACTIONS,
+  DESTRUCTIVE_ACTIONS,
+  DESTRUCTIVE_LIMIT_PER_MIN,
+  MAX_ACTIONS_PER_REQUEST,
+  ProviderName
+} from "../constants.js";
 import { toolRegistry } from "../tools/toolRegistry.js";
 import { createAuditEvent, updateAuditEvent, AuditPayload } from "../audit.js";
-import { checkRateLimit } from "../rateLimit.js";
+import { checkRateLimit, getRateLimitRemaining } from "../rateLimit.js";
 import { logger } from "../logger.js";
 import { sendAuditLog } from "../auditLog.js";
 import { getThreadState } from "./threadState.js";
 import { isAuthorized } from "../permissions.js";
 import { db } from "../db.js";
-import { DESTRUCTIVE_LIMIT_PER_MIN } from "../constants.js";
-import { buildImpact, formatImpact } from "../impact.js";
+import { buildImpact, formatImpact, type Impact } from "../impact.js";
+import type { PlannedAction } from "../llm/types.js";
 
 const confirmationRow = (id: string) =>
   new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -27,9 +34,49 @@ const confirmationRow = (id: string) =>
     new ButtonBuilder().setCustomId(`reject:${id}`).setLabel("Reject").setStyle(ButtonStyle.Danger)
   );
 
-const summarizePlan = (plan: { action: string; params: Record<string, unknown> }) => {
-  const paramText = JSON.stringify(plan.params, null, 2);
-  return `Action: ${plan.action}\nParams:\n${paramText}`;
+const normalizeActions = (plan: {
+  action: string;
+  params: Record<string, unknown>;
+  destructive: boolean;
+  actions?: PlannedAction[];
+}): PlannedAction[] => {
+  const base = {
+    action: plan.action,
+    params: plan.params ?? {},
+    destructive: plan.destructive
+  };
+  const list = Array.isArray(plan.actions) && plan.actions.length > 0 ? plan.actions : [base];
+  return list
+    .map((item) => ({
+      action: item.action,
+      params: item.params ?? {},
+      destructive: item.destructive ?? false
+    }))
+    .filter((item) => typeof item.action === "string" && item.action.length > 0);
+};
+
+const summarizeActions = (actions: PlannedAction[]) => {
+  if (actions.length === 1) {
+    const paramText = JSON.stringify(actions[0].params ?? {}, null, 2);
+    return `Action: ${actions[0].action}\nParams:\n${paramText}`;
+  }
+  return actions
+    .map((action, index) => {
+      const paramText = JSON.stringify(action.params ?? {}, null, 2);
+      return `#${index + 1} ${action.action}\nParams:\n${paramText}`;
+    })
+    .join("\n\n");
+};
+
+const mergeImpact = (base: Impact, next: Impact): Impact => {
+  const merged: Impact = { ...base };
+  (["channels", "roles", "members", "permissions"] as const).forEach((key) => {
+    const combined = [...(base[key] ?? []), ...(next[key] ?? [])];
+    if (combined.length > 0) {
+      merged[key] = Array.from(new Set(combined));
+    }
+  });
+  return merged;
 };
 
 const notifyError = async (input: {
@@ -94,7 +141,7 @@ export const handleThreadMessage = async (message: Message) => {
     return;
   }
 
-  if (!checkRateLimit(guildId, settings.rate_limit_per_min)) {
+  if (getRateLimitRemaining(guildId, settings.rate_limit_per_min) <= 0) {
     await message.reply("Rate limit exceeded. Try again later.");
     await notifyError({
       guild: message.guild,
@@ -165,44 +212,69 @@ export const handleThreadMessage = async (message: Message) => {
     }
   }
 
-  if (!ALLOWED_ACTIONS.has(plan.action)) {
-    await message.reply("Requested action is not allowed.");
+  const actions = normalizeActions(plan).filter((action) => action.action !== "none");
+  if (actions.length === 0) {
+    await message.reply(plan.reply);
+    return;
+  }
+
+  if (actions.length > MAX_ACTIONS_PER_REQUEST) {
+    await message.reply(`Too many actions requested (${actions.length}). Please split the request (max ${MAX_ACTIONS_PER_REQUEST}).`);
     await notifyError({
       guild: message.guild,
       logChannelId: settings.log_channel_id,
       actorTag: message.author.tag,
-      action: "action_not_allowed",
-      message: `Action not allowed: ${plan.action}`
+      action: "action_limit",
+      message: `Too many actions requested: ${actions.length}`
     });
     return;
   }
 
-  if (BANNED_ACTIONS.has(plan.action)) {
-    await message.reply("This action is forbidden.");
+  const forbidden = actions.filter((action) => BANNED_ACTIONS.has(action.action));
+  if (forbidden.length > 0) {
+    await message.reply(`This action is forbidden: ${forbidden.map((a) => a.action).join(", ")}`);
     await notifyError({
       guild: message.guild,
       logChannelId: settings.log_channel_id,
       actorTag: message.author.tag,
       action: "action_forbidden",
-      message: `Action forbidden: ${plan.action}`
+      message: `Action forbidden: ${forbidden.map((a) => a.action).join(", ")}`
     });
     return;
   }
 
-  if (plan.action === "none") {
-    await message.reply(plan.reply);
+  const notAllowed = actions.filter((action) => !ALLOWED_ACTIONS.has(action.action));
+  if (notAllowed.length > 0) {
+    await message.reply(`Requested action is not allowed: ${notAllowed.map((a) => a.action).join(", ")}`);
+    await notifyError({
+      guild: message.guild,
+      logChannelId: settings.log_channel_id,
+      actorTag: message.author.tag,
+      action: "action_not_allowed",
+      message: `Action not allowed: ${notAllowed.map((a) => a.action).join(", ")}`
+    });
     return;
   }
 
-  const destructive = plan.destructive || DESTRUCTIVE_ACTIONS.has(plan.action);
-  const impact = destructive ? await buildImpact(message.guild, plan.action, plan.params) : {};
-  const payload: AuditPayload = {
-    request: { action: plan.action, params: plan.params, raw_text: message.content, thread_id: message.channel.id },
-    impact
-  };
+  const remaining = getRateLimitRemaining(guildId, settings.rate_limit_per_min);
+  if (actions.length > remaining) {
+    await message.reply("Rate limit exceeded. Try again later.");
+    await notifyError({
+      guild: message.guild,
+      logChannelId: settings.log_channel_id,
+      actorTag: message.author.tag,
+      action: "rate_limit",
+      message: "Rate limit exceeded."
+    });
+    return;
+  }
 
-  if (destructive) {
-    if (!checkRateLimit(`destructive:${guildId}`, DESTRUCTIVE_LIMIT_PER_MIN)) {
+  const destructiveActions = actions.filter(
+    (action) => action.destructive || DESTRUCTIVE_ACTIONS.has(action.action)
+  );
+  if (destructiveActions.length > 0) {
+    const remainingDestructive = getRateLimitRemaining(`destructive:${guildId}`, DESTRUCTIVE_LIMIT_PER_MIN);
+    if (destructiveActions.length > remainingDestructive) {
       await message.reply("Destructive action rate limit exceeded. Try again later.");
       await notifyError({
         guild: message.guild,
@@ -214,8 +286,26 @@ export const handleThreadMessage = async (message: Message) => {
       return;
     }
 
+    let impact: Impact = {};
+    for (const action of destructiveActions) {
+      const nextImpact = await buildImpact(message.guild, action.action, action.params);
+      impact = mergeImpact(impact, nextImpact);
+    }
+
+    const auditAction = actions.length > 1 ? "batch" : actions[0].action;
+    const payload: AuditPayload = {
+      request: {
+        action: auditAction,
+        params: actions[0].params,
+        actions,
+        raw_text: message.content,
+        thread_id: message.channel.id
+      },
+      impact
+    };
+
     const audit = await createAuditEvent({
-      action: plan.action,
+      action: auditAction,
       actor_user_id: message.author.id,
       guild_id: guildId,
       target_id: null,
@@ -227,78 +317,108 @@ export const handleThreadMessage = async (message: Message) => {
 
     if (settings.log_channel_id) {
       await sendAuditLog(message.guild, settings.log_channel_id, {
-        action: plan.action,
+        action: auditAction,
         actorTag: message.author.tag,
         status: "pending",
         confirmation: "pending",
-        message: summarizePlan(plan)
+        message: summarizeActions(actions)
       });
     }
 
     await message.reply({
-      content: `${plan.reply}\n\n操作内容:\n${summarizePlan(plan)}\n\n影響範囲:\n${formatImpact(impact)}\n\nAccept or Reject?`,
+      content: `${plan.reply}\n\n操作内容:\n${summarizeActions(actions)}\n\n影響範囲:\n${formatImpact(impact)}\n\nAccept or Reject?`,
       components: [confirmationRow(audit.id)]
     });
     return;
   }
 
-  const handler = toolRegistry[plan.action];
-  if (!handler) {
-    await message.reply("Tool not implemented.");
-    await notifyError({
-      guild: message.guild,
-      logChannelId: settings.log_channel_id,
-      actorTag: message.author.tag,
-      action: "tool_missing",
-      message: `Tool not implemented: ${plan.action}`
-    });
+  const results: Array<{ action: string; ok: boolean; message: string; discordIds?: string[] }> = [];
+
+  for (const action of actions) {
+    if (!checkRateLimit(guildId, settings.rate_limit_per_min)) {
+      results.push({ action: action.action, ok: false, message: "Rate limit exceeded." });
+      await notifyError({
+        guild: message.guild,
+        logChannelId: settings.log_channel_id,
+        actorTag: message.author.tag,
+        action: "rate_limit",
+        message: "Rate limit exceeded."
+      });
+      break;
+    }
+
+    const handler = toolRegistry[action.action];
+    if (!handler) {
+      results.push({ action: action.action, ok: false, message: "Tool not implemented." });
+      await notifyError({
+        guild: message.guild,
+        logChannelId: settings.log_channel_id,
+        actorTag: message.author.tag,
+        action: "tool_missing",
+        message: `Tool not implemented: ${action.action}`
+      });
+      continue;
+    }
+
+    let result;
+    try {
+      result = await handler({ client: message.client, guild: message.guild, actor: message.author }, action.params);
+    } catch (error) {
+      logger.error({ error }, "Tool execution failed");
+      result = { ok: false, message: "Tool execution failed." };
+      await notifyError({
+        guild: message.guild,
+        logChannelId: settings.log_channel_id,
+        actorTag: message.author.tag,
+        action: "tool_execution_failed",
+        message: `Tool execution failed: ${action.action}`
+      });
+    }
+
+    results.push({ action: action.action, ok: result.ok, message: result.message, discordIds: result.discordIds });
+
+    if (!result.ok) {
+      const payload: AuditPayload = {
+        request: { action: action.action, params: action.params, raw_text: message.content, thread_id: message.channel.id },
+        impact: {}
+      };
+      await createAuditEvent({
+        action: action.action,
+        actor_user_id: message.author.id,
+        guild_id: guildId,
+        target_id: null,
+        payload: { ...payload, result: { ok: result.ok, message: result.message, discord_ids: result.discordIds } },
+        confirmation_required: false,
+        confirmation_status: "none",
+        status: "failure",
+        error_message: result.message
+      });
+    }
+
+    if (settings.log_channel_id) {
+      await sendAuditLog(message.guild, settings.log_channel_id, {
+        action: action.action,
+        actorTag: message.author.tag,
+        status: result.ok ? "success" : "failure",
+        confirmation: "none",
+        message: result.message
+      });
+    }
+  }
+
+  if (results.length === 1) {
+    const result = results[0];
+    if (result.ok) {
+      await message.reply(`${plan.reply}\n${result.message}`);
+    } else {
+      await message.reply(`Failed: ${result.message}`);
+    }
     return;
   }
 
-  let result;
-  try {
-    result = await handler({ client: message.client, guild: message.guild, actor: message.author }, plan.params);
-  } catch (error) {
-    logger.error({ error }, "Tool execution failed");
-    result = { ok: false, message: "Tool execution failed." };
-    await notifyError({
-      guild: message.guild,
-      logChannelId: settings.log_channel_id,
-      actorTag: message.author.tag,
-      action: "tool_execution_failed",
-      message: `Tool execution failed: ${plan.action}`
-    });
-  }
-
-  if (result.ok) {
-    await message.reply(`${plan.reply}\n${result.message}`);
-  } else {
-    await message.reply(`Failed: ${result.message}`);
-  }
-
-  if (!result.ok) {
-    await createAuditEvent({
-      action: plan.action,
-      actor_user_id: message.author.id,
-      guild_id: guildId,
-      target_id: null,
-      payload: { ...payload, result: { ok: result.ok, message: result.message, discord_ids: result.discordIds } },
-      confirmation_required: false,
-      confirmation_status: "none",
-      status: "failure",
-      error_message: result.message
-    });
-  }
-
-  if (settings.log_channel_id) {
-    await sendAuditLog(message.guild, settings.log_channel_id, {
-      action: plan.action,
-      actorTag: message.author.tag,
-      status: result.ok ? "success" : "failure",
-      confirmation: "none",
-      message: result.message
-    });
-  }
+  const intro = plan.reply.trim().length > 0 ? `${plan.reply}\n` : "";
+  const lines = results.map((item) => `• ${item.action}: ${item.ok ? "OK" : "Failed"} - ${item.message}`).join("\n");
+  await message.reply(`${intro}${lines}`);
 };
 
 export const handleConfirmation = async (interaction: import("discord.js").ButtonInteraction) => {
@@ -317,7 +437,17 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
   }
 
   const payload = record.payload_json as AuditPayload;
-  const plan = { action: record.action, params: payload.request.params };
+  const plannedActions = payload.request.actions ?? [
+    { action: payload.request.action ?? record.action, params: payload.request.params ?? {} }
+  ];
+  const actions = plannedActions
+    .map((action) => ({ action: action.action, params: action.params ?? {} }))
+    .filter((action) => typeof action.action === "string" && action.action.length > 0);
+
+  if (actions.length === 0) {
+    await interaction.reply({ ephemeral: true, content: "No actions to execute." });
+    return;
+  }
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
   const settings = await getGuildSettings(interaction.guild.id);
@@ -348,37 +478,44 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
     return;
   }
 
-  const handler = toolRegistry[record.action];
-  if (!handler) {
-    await interaction.reply({ content: "Tool not implemented." });
-    await updateAuditEvent(id, { confirmation_status: "approved", status: "failure", error_message: "Tool not implemented" });
-    return;
+  const results: Array<{ action: string; ok: boolean; message: string; discordIds?: string[] }> = [];
+
+  for (const action of actions) {
+    const handler = toolRegistry[action.action];
+    if (!handler) {
+      results.push({ action: action.action, ok: false, message: "Tool not implemented." });
+      continue;
+    }
+
+    try {
+      const result = await handler({ client: interaction.client, guild: interaction.guild, actor: interaction.user }, action.params);
+      results.push({ action: action.action, ok: result.ok, message: result.message, discordIds: result.discordIds });
+    } catch (error) {
+      logger.error({ error }, "Tool execution failed");
+      results.push({ action: action.action, ok: false, message: "Tool execution failed." });
+    }
   }
 
-  let result;
-  try {
-    result = await handler({ client: interaction.client, guild: interaction.guild, actor: interaction.user }, plan.params);
-  } catch (error) {
-    logger.error({ error }, "Tool execution failed");
-    result = { ok: false, message: "Tool execution failed." };
-  }
+  const okAll = results.every((item) => item.ok);
+  const summary = results.map((item) => `• ${item.action}: ${item.ok ? "OK" : "Failed"} - ${item.message}`).join("\n");
+  const discordIds = results.flatMap((item) => item.discordIds ?? []);
 
   await updateAuditEvent(id, {
     confirmation_status: "approved",
-    status: result.ok ? "success" : "failure",
-    error_message: result.ok ? null : result.message,
-    payload_json: { ...payload, result: { ok: result.ok, message: result.message, discord_ids: result.discordIds } }
+    status: okAll ? "success" : "failure",
+    error_message: okAll ? null : "One or more actions failed.",
+    payload_json: { ...payload, result: { ok: okAll, message: summary, discord_ids: discordIds } }
   });
 
   if (settings.log_channel_id) {
     await sendAuditLog(interaction.guild, settings.log_channel_id, {
       action: record.action,
       actorTag: interaction.user.tag,
-      status: result.ok ? "success" : "failure",
+      status: okAll ? "success" : "failure",
       confirmation: "approved",
-      message: result.message
+      message: summary
     });
   }
 
-  await interaction.reply({ content: result.ok ? `Done: ${result.message}` : `Failed: ${result.message}` });
+  await interaction.reply({ content: okAll ? `Done:\n${summary}` : `Failed:\n${summary}` });
 };
