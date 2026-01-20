@@ -72,17 +72,27 @@ export const getChannelDetails: ToolHandler = async (context, params) => {
 };
 
 export const createChannel: ToolHandler = async (context, params) => {
-  const name = params.name as string | undefined;
-  if (!name) return fail("Missing channel name.");
+  const typeValue = mapChannelType(params.type as string | undefined);
+  const nameParam = params.name as string | undefined;
+  const defaultName = typeValue === ChannelType.GuildVoice ? "voice-room" : "text-channel";
+  const name = nameParam && nameParam.trim().length > 0 ? nameParam.trim() : defaultName;
+  const userLimitRaw = params.user_limit as number | string | undefined;
+  const userLimitNum = typeof userLimitRaw === "string" ? Number(userLimitRaw) : userLimitRaw;
+  const userLimit =
+    typeof userLimitNum === "number" && Number.isFinite(userLimitNum) && userLimitNum >= 0
+      ? Math.min(Math.floor(userLimitNum), 99)
+      : undefined;
 
   const channel = await context.guild.channels.create({
     name,
-    type: mapChannelType(params.type as string | undefined) as GuildChannelTypes,
+    type: typeValue as GuildChannelTypes,
     parent: params.parent_id as string | undefined,
-    topic: params.topic as string | undefined
+    topic: params.topic as string | undefined,
+    ...(typeValue === ChannelType.GuildVoice && userLimit !== undefined ? { userLimit } : {})
   });
 
-  return ok(`Channel created: ${channel.name}`, [channel.id]);
+  const limitText = typeValue === ChannelType.GuildVoice && userLimit !== undefined ? ` user limit=${userLimit}` : "";
+  return ok(`Channel created: ${channel.name}${limitText}`, [channel.id]);
 };
 
 export const createThread: ToolHandler = async (context, params) => {

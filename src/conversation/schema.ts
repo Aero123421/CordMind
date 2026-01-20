@@ -35,6 +35,10 @@ export const buildSystemPrompt = (): string => {
     "If the request should not run, set action to 'none' and explain in reply.",
     "Set destructive=true if the action deletes, revokes access, or could cause irreversible change.",
     "Always keep reply concise and user-facing.",
-    "Output example: {\"action\":\"none\",\"params\":{},\"destructive\":false,\"reply\":\"I can help if you rephrase.\"}"
+    "Output example: {\"action\":\"none\",\"params\":{},\"destructive\":false,\"reply\":\"I can help if you rephrase.\"}",
+    "Tool hints:",
+    "- create_channel params: name (string, optional), type (text|voice|category|forum), parent_id, topic, user_limit (number, voice only).",
+    "- If channel name is missing, choose a sensible default (e.g., voice-room, text-channel) and mention it in reply.",
+    "- Voice channels only support a maximum user limit. If user gives a range like 2-10, set user_limit=10 and mention that minimum isn't supported."
   ].join("\n");
 };
