@@ -8,17 +8,17 @@
 ![docker](https://img.shields.io/badge/docker-ready-2496ed?style=flat-square)
 ![status](https://img.shields.io/badge/status-alpha-ff7a59?style=flat-square)
 
-[English](#en) | [日本語](#jp)
+[English ↓](#english) | [日本語 ↓](#japanese)
 
 </div>
 
 ---
 
-<a id="en"></a>
+<a id="english"></a>
 
 # English
 
-## At a Glance
+## Quick Summary
 - Mention the bot to create a **dedicated Thread**
 - Continue **without further mentions** (Message Content Intent required)
 - Destructive actions require **Accept / Reject** with **impact preview**
@@ -27,104 +27,20 @@
 ## What is CordMind?
 CordMind is a **self-hosted Discord administration assistant**. It turns natural-language requests into safe, allowlisted Discord operations, with strict permission checks and audit logging. It is designed for **small-scale servers (≈ up to 5 guilds)** where safety and clarity matter more than raw throughput.
 
-**Typical use cases**
-- Create / rename / delete channels or roles
-- Update permission overwrites for a role or user
-- Assign / remove roles
-- Inspect server or bot permissions
+## Table of Contents
+- Quick Start (Docker)
+- Discord Developer Portal Settings
+- Configuration (.env)
+- Usage
+- Slash Commands
+- Use Cases (Examples)
+- Permissions / Required Discord Scopes
+- Security Model
+- Architecture
+- Troubleshooting
+- Development
 
-**What it is not**
-- A general chat bot or entertainment bot
-- A SaaS product (this project is self-hosted)
-
-## Features
-| Category | Details |
-| --- | --- |
-| Conversation | One request = one Thread; no further mentions needed |
-| Safety | Confirmation UI + impact preview (channels/roles/members/permissions) |
-| Governance | Admin / Manager role only |
-| Providers | Gemini, xAI, Groq, Cerebras, Z.AI |
-| Storage | Encrypted API keys (AES-256-GCM) + short-term audit logs |
-
-## Use Cases (Examples)
-- “Create a private channel for the mods and give it only Moderator role access.”  
-- “Rename #general to #lobby.”  
-- “List all roles and show details for the ‘Moderator’ role.”  
-- “Remove the Temp role from user 123.”  
-- “Update permissions so @Newcomer can read #rules only.”  
-
-## Permissions / Required Discord Scopes
-**Application scopes**
-- `bot`
-- `applications.commands`
-
-**Required Gateway Intents**
-- `Guilds`
-- `GuildMessages`
-- `MessageContent` (required for Thread messages without mentions)
-- `GuildMembers` (role checks)
-
-**Bot permissions (recommended)**
-- Manage Channels
-- Manage Roles
-- Manage Threads
-- Read Message History
-- Send Messages
-- View Channels
-- Manage Messages (for pinning)
-
-## Discord Developer Portal Settings
-**English (what to enable)**
-1) **Bot → Privileged Gateway Intents**
-   - Enable **Message Content Intent** (required for Thread messages without mentions)
-   - Enable **Server Members Intent** (role checks)
-2) **Bot → Permissions**
-   - Grant the permissions listed above (Manage Channels/Roles/Threads, etc.)
-3) **OAuth2 → URL Generator**
-   - Scopes: `bot`, `applications.commands`
-   - Bot Permissions: same as above
-   - Use the generated URL to invite the bot
-
-## Security Model
-- **Principle of least privilege**: Only allowlisted tools can execute
-- **Explicit confirmation**: destructive actions require Accept / Reject
-- **Impact preview**: shows affected channels/roles/members/permissions before execution
-- **Role-based authorization**: Admin or configured manager role only
-- **API key protection**: AES-256-GCM encrypted at rest
-- **Audit logging**: destructive actions are recorded (short-term retention)
-
-## Architecture (Detailed)
-```
-                       +-----------------------------+
-                       |        Discord Server       |
-                       |  User -> @mention -> Thread |
-                       +--------------+--------------+
-                                      |
-                                      v
-                        +---------------------------+
-                        |   CordMind (discord.js)   |
-                        +-----+-----------+---------+
-                              |           |
-                +-------------+           +--------------------+
-                |                                         |
-       +--------v--------+                       +--------v--------+
-       | Conversation    |                       | Slash Commands  |
-       | Manager         |                       | /discordaimanage|
-       +--------+--------+                       +--------+--------+
-                |                                         |
-       +--------v--------+                       +--------v--------+
-       | LLM Adapter     |                       | Settings / DB   |
-       | (Gemini/xAI/...)|                       | + Encryption    |
-       +--------+--------+                       +--------+--------+
-                |                                         |
-       +--------v--------+                       +--------v--------+
-       | Tool Layer      |                       | Audit Log        |
-       | (Allowlist)     |                       | DB + Log Channel |
-       +--------+--------+                       +------------------+
-                |
-                v
-        Discord API (channels/roles/permissions)
-```
+---
 
 ## Quick Start (Docker)
 1) Create `.env` (see below)
@@ -133,6 +49,17 @@ CordMind is a **self-hosted Discord administration assistant**. It turns natural
 ```bash
 docker compose up --build
 ```
+
+## Discord Developer Portal Settings
+1) **Bot → Privileged Gateway Intents**
+   - Enable **Message Content Intent** (required for Thread messages without mentions)
+   - Enable **Server Members Intent** (role checks)
+2) **Bot → Permissions**
+   - Grant permissions listed in “Permissions / Required Discord Scopes”
+3) **OAuth2 → URL Generator**
+   - Scopes: `bot`, `applications.commands`
+   - Bot Permissions: same as below
+   - Use the generated URL to invite the bot
 
 ## Configuration (.env)
 **Required**
@@ -175,107 +102,42 @@ DB_WAIT_RETRIES=30
 | `/discordaimanage rate` | Ops per minute |
 | `/discordaimanage show` | Show current settings |
 
-## Rate Limits
-- General operations: `rate_limit_per_min` (default 10)
-- Destructive operations: **2 / minute** (fixed)
+## Use Cases (Examples)
+- “Create a private channel for the mods and give it only Moderator role access.”
+- “Rename #general to #lobby.”
+- “List all roles and show details for the ‘Moderator’ role.”
+- “Remove the Temp role from user 123.”
+- “Update permissions so @Newcomer can read #rules only.”
 
-## Audit Logs
-- Destructive actions are recorded
-- Short-term retention (default 7 days)
-- Optional Discord log channel
-
-## Troubleshooting
-- Thread messages are empty → enable **Message Content Intent** in Developer Portal
-- API key missing → `/discordaimanage api`
-- Model not set → `/discordaimanage model`
-
-## Development
-- Plans: `docs/plan/`
-- Build: `npm run build`
-- DB sync: `npm run db:push`
-
----
-
-<a id="jp"></a>
-
-# 日本語
-
-## 概要
-- Bot を @メンションすると **専用Thread** を作成
-- Thread 内は **メンション不要**（Message Content Intent 必須）
-- 破壊的操作は **Accept / Reject** の確認 + **影響範囲表示**
-- **Gemini / xAI / Groq / Cerebras / Z.AI** 対応
-
-## CordMind とは
-CordMind は **自己ホスト型のDiscord管理アシスタント** です。自然言語の指示を安全なDiscord操作に変換し、厳格な権限チェックと監査ログによって安全性を担保します。**小規模運用（目安: 最大5ギルド）** を前提としています。
-
-**主な用途**
-- チャンネル / ロールの作成・名称変更・削除
-- ロールやユーザーの権限上書き更新
-- ロール付与 / 削除
-- 権限（ユーザー/ボット）の確認
-
-**対象外**
-- 雑談や娯楽向けのチャットBot
-- SaaS型のクラウドサービス
-
-## 特徴
-| 分類 | 内容 |
-| --- | --- |
-| 会話 | 1依頼=1Thread / Thread内はメンション不要 |
-| 安全 | 確認UI + 影響範囲表示（チャンネル/ロール/メンバー/権限） |
-| 権限 | 管理者 or 管理ロールのみ操作可能 |
-| プロバイダー | Gemini / xAI / Groq / Cerebras / Z.AI |
-| 保存 | APIキー暗号化（AES-256-GCM）+ 短期監査ログ |
-
-## Use Cases（具体例）
-- 「モデレーター専用の非公開チャンネルを作成して権限を付与して」  
-- 「#general を #lobby にリネームして」  
-- 「ロール一覧を表示して “Moderator” の詳細を教えて」  
-- 「ユーザー123から Temp ロールを外して」  
-- 「@Newcomer が #rules だけ読めるように権限を更新して」  
-
-## 必要権限 / Discord Scopes
+## Permissions / Required Discord Scopes
 **Application scopes**
 - `bot`
 - `applications.commands`
 
-**必要な Gateway Intents**
+**Required Gateway Intents**
 - `Guilds`
 - `GuildMessages`
-- `MessageContent`（Thread内メンション不要のため必須）
-- `GuildMembers`（ロールチェック用）
+- `MessageContent` (required for Thread messages without mentions)
+- `GuildMembers` (role checks)
 
-**推奨 Bot 権限**
-- チャンネル管理
-- ロール管理
-- スレッド管理
-- メッセージ履歴の閲覧
-- メッセージ送信
-- チャンネル閲覧
-- メッセージの管理（ピン留め用）
+**Bot permissions (recommended)**
+- Manage Channels
+- Manage Roles
+- Manage Threads
+- Read Message History
+- Send Messages
+- View Channels
+- Manage Messages (for pinning)
 
-## Discord 開発者ポータル設定
-**日本語（設定する項目）**
-1) **Bot → Privileged Gateway Intents**
-   - **Message Content Intent** を有効化（Thread内メンション不要のため必須）
-   - **Server Members Intent** を有効化（ロールチェック用）
-2) **Bot → Permissions**
-   - 上記の推奨権限を付与
-3) **OAuth2 → URL Generator**
-   - Scopes: `bot`, `applications.commands`
-   - Bot Permissions: 上記と同じ
-   - 生成されたURLでBotを招待
+## Security Model
+- **Principle of least privilege**: Only allowlisted tools can execute
+- **Explicit confirmation**: destructive actions require Accept / Reject
+- **Impact preview**: shows affected channels/roles/members/permissions before execution
+- **Role-based authorization**: Admin or configured manager role only
+- **API key protection**: AES-256-GCM encrypted at rest
+- **Audit logging**: destructive actions are recorded (short-term retention)
 
-## セキュリティモデル
-- **最小権限**: Allowlist 以外の操作は実行不可
-- **明示的な確認**: 破壊的操作は Accept / Reject 必須
-- **影響範囲の提示**: 実行前に対象を表示
-- **権限制御**: 管理者 or 管理ロールのみ操作可能
-- **APIキー保護**: AES-256-GCM で暗号化保存
-- **監査ログ**: 破壊的操作を記録（短期保管）
-
-## アーキテクチャ（詳細）
+## Architecture
 ```
                        +-----------------------------+
                        |        Discord Server       |
@@ -308,6 +170,46 @@ CordMind は **自己ホスト型のDiscord管理アシスタント** です。�
         Discord API (channels/roles/permissions)
 ```
 
+## Troubleshooting
+- Thread messages are empty → enable **Message Content Intent** in Developer Portal
+- API key missing → `/discordaimanage api`
+- Model not set → `/discordaimanage model`
+
+## Development
+- Plans: `docs/plan/`
+- Build: `npm run build`
+- DB sync: `npm run db:push`
+
+---
+
+<a id="japanese"></a>
+
+# 日本語
+
+## 概要
+- Bot を @メンションすると **専用Thread** を作成
+- Thread 内は **メンション不要**（Message Content Intent 必須）
+- 破壊的操作は **Accept / Reject** の確認 + **影響範囲表示**
+- **Gemini / xAI / Groq / Cerebras / Z.AI** 対応
+
+## CordMind とは
+CordMind は **自己ホスト型のDiscord管理アシスタント** です。自然言語の指示を安全なDiscord操作に変換し、厳格な権限チェックと監査ログによって安全性を担保します。**小規模運用（目安: 最大5ギルド）** を前提としています。
+
+## 目次
+- クイックスタート（Docker）
+- Discord 開発者ポータル設定
+- 設定 (.env)
+- 使い方
+- スラッシュコマンド
+- Use Cases（具体例）
+- 必要権限 / Discord Scopes
+- セキュリティモデル
+- アーキテクチャ
+- トラブルシュート
+- 開発
+
+---
+
 ## クイックスタート（Docker）
 1) `.env` を作成（下記参照）
 2) 1コマンドで DB + Bot を起動
@@ -315,6 +217,17 @@ CordMind は **自己ホスト型のDiscord管理アシスタント** です。�
 ```bash
 docker compose up --build
 ```
+
+## Discord 開発者ポータル設定
+1) **Bot → Privileged Gateway Intents**
+   - **Message Content Intent** を有効化（Thread内メンション不要のため必須）
+   - **Server Members Intent** を有効化（ロールチェック用）
+2) **Bot → Permissions**
+   - 下記「必要権限」に記載の権限を付与
+3) **OAuth2 → URL Generator**
+   - Scopes: `bot`, `applications.commands`
+   - Bot Permissions: 下記と同じ
+   - 生成されたURLでBotを招待
 
 ## 設定 (.env)
 **必須**
@@ -357,14 +270,73 @@ DB_WAIT_RETRIES=30
 | `/discordaimanage rate` | 1分あたりの操作数 |
 | `/discordaimanage show` | 設定内容を表示 |
 
-## レート制限
-- 通常操作: `rate_limit_per_min`（デフォルト10）
-- 破壊的操作: **1分あたり2回**（固定）
+## Use Cases（具体例）
+- 「モデレーター専用の非公開チャンネルを作成して権限を付与して」
+- 「#general を #lobby にリネームして」
+- 「ロール一覧を表示して “Moderator” の詳細を教えて」
+- 「ユーザー123から Temp ロールを外して」
+- 「@Newcomer が #rules だけ読めるように権限を更新して」
 
-## 監査ログ
-- 破壊的操作は必ず記録
-- 短期保管（デフォルト7日）
-- Discordログチャンネルは任意
+## 必要権限 / Discord Scopes
+**Application scopes**
+- `bot`
+- `applications.commands`
+
+**必要な Gateway Intents**
+- `Guilds`
+- `GuildMessages`
+- `MessageContent`（Thread内メンション不要のため必須）
+- `GuildMembers`（ロールチェック用）
+
+**推奨 Bot 権限**
+- チャンネル管理
+- ロール管理
+- スレッド管理
+- メッセージ履歴の閲覧
+- メッセージ送信
+- チャンネル閲覧
+- メッセージの管理（ピン留め用）
+
+## セキュリティモデル
+- **最小権限**: Allowlist 以外の操作は実行不可
+- **明示的な確認**: 破壊的操作は Accept / Reject 必須
+- **影響範囲の提示**: 実行前に対象を表示
+- **権限制御**: 管理者 or 管理ロールのみ操作可能
+- **APIキー保護**: AES-256-GCM で暗号化保存
+- **監査ログ**: 破壊的操作を記録（短期保管）
+
+## アーキテクチャ
+```
+                       +-----------------------------+
+                       |        Discord Server       |
+                       |  User -> @mention -> Thread |
+                       +--------------+--------------+
+                                      |
+                                      v
+                        +---------------------------+
+                        |   CordMind (discord.js)   |
+                        +-----+-----------+---------+
+                              |           |
+                +-------------+           +--------------------+
+                |                                         |
+       +--------v--------+                       +--------v--------+
+       | Conversation    |                       | Slash Commands  |
+       | Manager         |                       | /discordaimanage|
+       +--------+--------+                       +--------+--------+
+                |                                         |
+       +--------v--------+                       +--------v--------+
+       | LLM Adapter     |                       | Settings / DB   |
+       | (Gemini/xAI/...)|                       | + Encryption    |
+       +--------+--------+                       +--------+--------+
+                |                                         |
+       +--------v--------+                       +--------v--------+
+       | Tool Layer      |                       | Audit Log        |
+       | (Allowlist)     |                       | DB + Log Channel |
+       +--------+--------+                       +------------------+
+                |
+                v
+        Discord API (channels/roles/permissions)
+```
 
 ## トラブルシュート
 - Thread内メッセージが空 → **Message Content Intent** を有効化
@@ -378,4 +350,4 @@ DB_WAIT_RETRIES=30
 
 ---
 
-[Back to English](#en)
+[Back to English](#english)
