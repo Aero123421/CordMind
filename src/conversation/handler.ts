@@ -22,12 +22,12 @@ import { createAuditEvent, updateAuditEvent, AuditPayload } from "../audit.js";
 import { checkRateLimit, getRateLimitRemaining } from "../rateLimit.js";
 import { logger } from "../logger.js";
 import { sendAuditLog } from "../auditLog.js";
-import { getThreadState } from "./threadState.js";
+import { appendThreadSummary, getThreadState } from "./threadState.js";
 import { isAuthorized } from "../permissions.js";
 import { db } from "../db.js";
 import { buildImpact, formatImpact, type Impact } from "../impact.js";
 import type { PlannedAction } from "../llm/types.js";
-import { detectDiagnosticsTopic, runDiagnostics } from "../diagnostics.js";
+import { detectDiagnosticsTopic } from "../diagnostics.js";
 
 const t = (lang: string | null | undefined, en: string, ja: string) => (lang === "ja" ? ja : en);
 const MAX_AGENT_STEPS = 6;
@@ -205,6 +205,7 @@ const buildMessages = async (message: Message, lang: string | null | undefined, 
 };
 
 const OBSERVATION_ACTIONS = new Set([
+  "diagnose_guild",
   "list_channels",
   "get_channel_details",
   "list_roles",
@@ -216,6 +217,35 @@ const OBSERVATION_ACTIONS = new Set([
 ]);
 
 const isObservationAction = (action: string) => OBSERVATION_ACTIONS.has(action);
+
+const MEMORY_SKIP_ACTIONS = new Set([
+  "none",
+  ...Array.from(OBSERVATION_ACTIONS.values())
+]);
+
+const shouldRememberAction = (action: string) => !MEMORY_SKIP_ACTIONS.has(action);
+
+const buildMemoryAppend = (
+  lang: string | null | undefined,
+  results: Array<{ action: string; ok: boolean; message: string; discordIds?: string[] }>
+) => {
+  const remembered = results.filter((item) => shouldRememberAction(item.action));
+  if (remembered.length === 0) return null;
+
+  const now = new Date();
+  const stamp = `${now.toISOString().slice(0, 19).replace("T", " ")}`;
+  const okText = t(lang, "OK", "成功");
+  const failText = t(lang, "Failed", "失敗");
+
+  const lines = remembered.map((item) => {
+    const ids = (item.discordIds ?? []).slice(0, 6).join(",");
+    const idText = ids.length > 0 ? ` ids=${ids}` : "";
+    const msg = item.message.replace(/\s+/g, " ").slice(0, 180);
+    return `- [${stamp}] ${item.action}: ${item.ok ? okText : failText}${idText} ${msg}`.trim();
+  });
+
+  return lines.join("\n");
+};
 
 const truncateForLLM = (input: string, maxChars: number) => {
   if (input.length <= maxChars) return input;
@@ -319,42 +349,36 @@ export const handleThreadMessage = async (message: Message) => {
   }
 
   const diagnosticsTopic = detectDiagnosticsTopic(message.content, settings.language);
-  if (diagnosticsTopic) {
-    if (!checkRateLimit(guildId, settings.rate_limit_per_min)) {
-      await message.reply(t(settings.language, "Rate limit exceeded. Try again later.", "レート制限を超えました。少し待ってから再試行してください。"));
-      await notifyError({
-        guild: message.guild,
-        logChannelId: settings.log_channel_id,
-        actorTag: message.author.tag,
-        action: "rate_limit",
-        message: "Rate limit exceeded."
-      });
-      return;
-    }
-
-    try {
-      const report = await runDiagnostics(
-        { client: message.client, guild: message.guild, actor: message.author, lang: settings.language },
-        diagnosticsTopic
-      );
-      await message.reply(report);
-    } catch (error) {
-      logger.error({ err: error }, "Diagnostics failed");
-      await message.reply(t(settings.language, "Failed to run diagnostics.", "診断に失敗しました。Botの権限/ログを確認してください。"));
-      await notifyError({
-        guild: message.guild,
-        logChannelId: settings.log_channel_id,
-        actorTag: message.author.tag,
-        action: "diagnostics_failed",
-        message: "Diagnostics failed."
-      });
-    }
-
-    return;
-  }
 
   const apiKey = await getDecryptedApiKey(guildId, settings.provider as ProviderName);
   if (!apiKey) {
+    if (diagnosticsTopic) {
+      if (!checkRateLimit(guildId, settings.rate_limit_per_min)) {
+        await message.reply(t(settings.language, "Rate limit exceeded. Try again later.", "レート制限を超えました。少し待ってから再試行してください。"));
+        await notifyError({
+          guild: message.guild,
+          logChannelId: settings.log_channel_id,
+          actorTag: message.author.tag,
+          action: "rate_limit",
+          message: "Rate limit exceeded."
+        });
+        return;
+      }
+
+      try {
+        const diagnosticsHandler = toolRegistry.diagnose_guild;
+        const report = await diagnosticsHandler(
+          { client: message.client, guild: message.guild, actor: message.author, lang: settings.language },
+          { topic: diagnosticsTopic }
+        );
+        await message.reply(report.message);
+      } catch (error) {
+        logger.error({ err: error }, "Diagnostics failed");
+        await message.reply(t(settings.language, "Failed to run diagnostics.", "診断に失敗しました。Botの権限/ログを確認してください。"));
+      }
+      return;
+    }
+
     await message.reply(
       t(
         settings.language,
@@ -398,10 +422,48 @@ export const handleThreadMessage = async (message: Message) => {
     "解釈に失敗しました。もう少し具体的に言い換えてください。"
   );
 
+  if (diagnosticsTopic) {
+    if (!checkRateLimit(guildId, settings.rate_limit_per_min)) {
+      await message.reply(t(settings.language, "Rate limit exceeded. Try again later.", "レート制限を超えました。少し待ってから再試行してください。"));
+      await notifyError({
+        guild: message.guild,
+        logChannelId: settings.log_channel_id,
+        actorTag: message.author.tag,
+        action: "rate_limit",
+        message: "Rate limit exceeded."
+      });
+      return;
+    }
+
+    const action: PlannedAction = { action: "diagnose_guild", params: { topic: diagnosticsTopic }, destructive: false };
+    const handler = toolRegistry[action.action];
+    if (handler) {
+      try {
+        const result = await handler({ client: message.client, guild: message.guild, actor: message.author, lang: settings.language }, action.params);
+        agentMessages.push({ role: "assistant" as const, content: buildToolResultMessage(action, result) });
+      } catch (error) {
+        logger.error({ err: error }, "Diagnostics tool failed");
+        agentMessages.push({
+          role: "assistant" as const,
+          content: buildToolResultMessage(action, { ok: false, message: "diagnose_guild failed" })
+        });
+      }
+
+      agentMessages.splice(1, 0, {
+        role: "system" as const,
+        content: t(
+          settings.language,
+          "The user asked for an overview/diagnosis. Use the diagnostics result to give a helpful report and next question. Prefer action='none' unless the user explicitly asked to change something.",
+          "ユーザーは概要/診断を求めています。診断結果を使って、分かりやすい所見と次の確認質問を返してください。明示的な変更依頼がない限り action='none' を優先してください。"
+        )
+      });
+    }
+  }
+
   for (let step = 0; step < MAX_AGENT_STEPS; step += 1) {
     let plan;
     try {
-      plan = await generateToolPlan(adapter, agentMessages, { fallbackReply: planFallbackReply });
+      plan = await generateToolPlan(adapter, agentMessages, { fallbackReply: planFallbackReply, allowTextFallback: true });
     } catch (error) {
       logger.warn({ err: error }, "LLM planning failed, retrying once");
       try {
@@ -410,7 +472,7 @@ export const handleThreadMessage = async (message: Message) => {
           role: "system" as const,
           content: "Return only valid JSON that matches the schema. No markdown or extra text."
         });
-        plan = await generateToolPlan(adapter, retryMessages, { fallbackReply: planFallbackReply });
+        plan = await generateToolPlan(adapter, retryMessages, { fallbackReply: planFallbackReply, allowTextFallback: true });
       } catch (retryError) {
         logger.error({ err: retryError }, "LLM planning failed");
         await message.reply(t(settings.language, "Failed to interpret the request. Please rephrase.", "解釈に失敗しました。もう少し具体的に言い換えてください。"));
@@ -475,7 +537,7 @@ export const handleThreadMessage = async (message: Message) => {
       return;
     }
 
-    const destructiveActions = actions.filter((action) => action.destructive || DESTRUCTIVE_ACTIONS.has(action.action));
+    const destructiveActions = actions.filter((action) => DESTRUCTIVE_ACTIONS.has(action.action));
     const explicitObservation = actions.find((action) => isObservationAction(action.action));
     const fallbackObservation = inferObservationFallback(actions[0], message.content);
     const observationAction = isObservationAction(actions[0].action)
@@ -676,6 +738,17 @@ export const handleThreadMessage = async (message: Message) => {
 
     if (results.length === 1) {
       const result = results[0];
+      const memoryAppend = buildMemoryAppend(settings.language, results);
+      if (memoryAppend) {
+        appendThreadSummary({
+          threadId: message.channel.id,
+          guildId,
+          ownerUserId: threadState?.owner_user_id ?? message.author.id,
+          append: memoryAppend
+        }).catch(() => {
+          // ignore
+        });
+      }
       if (result.ok) {
         await message.reply(`${plan.reply}\n${result.message}`);
       } else {
@@ -688,6 +761,17 @@ export const handleThreadMessage = async (message: Message) => {
     const okText = t(settings.language, "OK", "成功");
     const failText = t(settings.language, "Failed", "失敗");
     const lines = results.map((item) => `• ${item.action}: ${item.ok ? okText : failText} - ${item.message}`).join("\n");
+    const memoryAppend = buildMemoryAppend(settings.language, results);
+    if (memoryAppend) {
+      appendThreadSummary({
+        threadId: message.channel.id,
+        guildId,
+        ownerUserId: threadState?.owner_user_id ?? message.author.id,
+        append: memoryAppend
+      }).catch(() => {
+        // ignore
+      });
+    }
     await message.reply(`${intro}${lines}`);
     return;
   }
@@ -767,7 +851,7 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
       break;
     }
 
-    const isDestructive = action.destructive || DESTRUCTIVE_ACTIONS.has(action.action);
+    const isDestructive = DESTRUCTIVE_ACTIONS.has(action.action);
     if (isDestructive && !checkRateLimit(`destructive:${interaction.guild.id}`, DESTRUCTIVE_LIMIT_PER_MIN)) {
       results.push({
         action: action.action,
@@ -800,6 +884,17 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
   const failText = t(lang, "Failed", "失敗");
   const summary = results.map((item) => `• ${item.action}: ${item.ok ? okText : failText} - ${item.message}`).join("\n");
   const discordIds = results.flatMap((item) => item.discordIds ?? []);
+  const memoryAppend = buildMemoryAppend(lang, results);
+  if (memoryAppend) {
+    appendThreadSummary({
+      threadId: payload.request.thread_id ?? interaction.channelId,
+      guildId: interaction.guild.id,
+      ownerUserId: record.actor_user_id,
+      append: memoryAppend
+    }).catch(() => {
+      // ignore
+    });
+  }
 
   await updateAuditEvent(id, {
     confirmation_status: "approved",

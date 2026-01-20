@@ -9,6 +9,7 @@ import {
 } from "discord.js";
 import type { ToolContext, ToolHandler, ToolResult } from "./types.js";
 import { t } from "../i18n.js";
+import { runDiagnostics, type DiagnosticsTopic } from "../diagnostics.js";
 
 const extractId = (value: unknown, pattern: RegExp): string | null => {
   if (typeof value !== "string") return null;
@@ -115,6 +116,9 @@ const mapChannelType = (value?: string): ChannelType => {
 
 const ok = (message: string, ids?: string[]): ToolResult => ({ ok: true, message, discordIds: ids });
 const fail = (message: string): ToolResult => ({ ok: false, message });
+
+const isDiagnosticsTopic = (value: unknown): value is DiagnosticsTopic =>
+  typeof value === "string" && (["overview", "permissions", "roles", "channels"] as const).includes(value as DiagnosticsTopic);
 
 const parseNumber = (value: unknown, fallback: number): number => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -412,6 +416,12 @@ export const getBotPermissions: ToolHandler = async (context) => {
   const botMember = await context.guild.members.fetch(context.client.user?.id ?? "");
   const perms = botMember.permissions.toArray().join(", ");
   return ok(t(context.lang, `Bot permissions: ${perms}`, `Bot の権限: ${perms}`));
+};
+
+export const diagnoseGuild: ToolHandler = async (context, params) => {
+  const topic = isDiagnosticsTopic(params.topic) ? params.topic : "overview";
+  const report = await runDiagnostics(context, topic);
+  return ok(report);
 };
 
 export const findMembers: ToolHandler = async (context, params) => {

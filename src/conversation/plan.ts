@@ -75,11 +75,31 @@ const normalizePlan = (input: unknown, fallbackReply: string) => {
 export const generateToolPlan = async (
   adapter: LLMAdapter,
   messages: ChatMessage[],
-  options?: { fallbackReply?: string }
+  options?: { fallbackReply?: string; allowTextFallback?: boolean }
 ): Promise<ToolPlan> => {
   const raw = await adapter.generatePlan(messages, toolPlanSchema);
   const parsed = tryParseJson(raw);
   if (!parsed) {
+    if (options?.allowTextFallback) {
+      const trimmed = raw.trim();
+      const looksStructured =
+        trimmed.startsWith("```") ||
+        trimmed.includes("{") ||
+        trimmed.includes("}") ||
+        trimmed.includes("[") ||
+        trimmed.includes("]");
+
+      const replyCandidate = !looksStructured && trimmed.length > 0 ? trimmed.slice(0, 1200) : "";
+      const fallbackReply = options?.fallbackReply ?? defaultFallbackReply;
+      const reply = replyCandidate.length > 0 ? replyCandidate : fallbackReply;
+
+      const normalized = normalizePlan({ action: "none", params: {}, destructive: false, reply }, fallbackReply);
+      if (!validate(normalized)) {
+        return normalizePlan({ action: "none", params: {}, destructive: false, reply: fallbackReply }, fallbackReply) as ToolPlan;
+      }
+      return normalized as ToolPlan;
+    }
+
     throw new Error("LLM did not return valid JSON");
   }
 

@@ -70,6 +70,7 @@ export const DEFAULT_MODEL_LISTS: Record<ProviderName, string[]> = {
 
 export const ALLOWED_ACTIONS = new Set([
   "none",
+  "diagnose_guild",
   "list_channels",
   "get_channel_details",
   "create_channel",

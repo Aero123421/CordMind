@@ -55,6 +55,7 @@ export const buildSystemPrompt = (lang: string | null | undefined): string => {
     "Always keep reply concise and user-facing.",
     "Output example: {\"action\":\"none\",\"params\":{},\"destructive\":false,\"reply\":\"I can help if you rephrase.\"}",
     "Tool hints:",
+    "- diagnose_guild params: topic (overview|permissions|roles|channels). Use this when the user asks for server issues/overview/diagnosis.",
     "- Prefer using tools to inspect the guild instead of asking the user for IDs.",
     "- list_channels params: type (text|voice|category|forum|any), name_contains (string), limit (number). Use this to find channel IDs/names.",
     "- get_channel_details params: channel_id or channel_name (exact).",
