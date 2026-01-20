@@ -133,6 +133,14 @@ const buildApiKeyRow = (scope: "setup" | "setting", lang: string | null | undefi
   return new ActionRowBuilder<ButtonBuilder>().addComponents(setButton, clearButton);
 };
 
+const buildApiKeyStatus = async (guildId: string, provider: ProviderName, lang: string | null | undefined) => {
+  const hasKey = await hasProviderCredentials(guildId, provider);
+  const providerLine = t(lang, "Provider", "プロバイダー");
+  const keyLine = t(lang, "API key", "APIキー");
+  const keyStatus = hasKey ? t(lang, "set", "設定済み") : t(lang, "not set", "未設定");
+  return `${providerLine}: ${provider}\n${keyLine}: ${keyStatus}`;
+};
+
 const buildThreadArchiveRow = (lang: string | null | undefined, current?: number | null) => {
   const select = new StringSelectMenuBuilder()
     .setCustomId("setting:thread")
@@ -248,9 +256,8 @@ export const handleComponent = async (interaction: import("discord.js").Interact
     if (scope === "setup" && action === "provider") {
       const provider = value as ProviderName;
       await updateGuildSettings(interaction.guildId, { provider });
-      const hasKey = await hasProviderCredentials(interaction.guildId, provider);
       const nextText = t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください");
-      const apiStatus = hasKey ? t(lang, "API key set", "APIキー設定済み") : t(lang, "API key not set", "APIキー未設定");
+      const apiStatus = await buildApiKeyStatus(interaction.guildId, provider, lang);
       const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model);
       await interaction.update({
         content: `${nextText}\n${apiStatus}`,
@@ -287,8 +294,9 @@ export const handleComponent = async (interaction: import("discord.js").Interact
           });
           return;
         case "api_key":
+          const apiStatus = await buildApiKeyStatus(interaction.guildId, settings.provider as ProviderName, lang);
           await interaction.update({
-            content: t(lang, "Manage API Key", "APIキーを管理"),
+            content: `${t(lang, "Manage API Key", "APIキーを管理")}\n${apiStatus}`,
             components: [buildApiKeyRow("setting", lang), buildBackRow(lang)]
           });
           return;
@@ -411,9 +419,8 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
     if (scope === "setup" && action === "provider" && subAction === "next") {
       const provider = settings.provider as ProviderName;
-      const hasKey = await hasProviderCredentials(interaction.guildId, provider);
       const nextText = t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください");
-      const apiStatus = hasKey ? t(lang, "API key set", "APIキー設定済み") : t(lang, "API key not set", "APIキー未設定");
+      const apiStatus = await buildApiKeyStatus(interaction.guildId, provider, lang);
       const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model);
       await interaction.update({
         content: `${nextText}\n${apiStatus}`,
@@ -476,8 +483,9 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
       if (scope === "setup") {
         const modelRow = await buildModelRow(interaction.guildId, "setup", settings.provider as ProviderName, settings.model);
+        const apiStatus = await buildApiKeyStatus(interaction.guildId, settings.provider as ProviderName, lang);
         await interaction.update({
-          content: t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください"),
+          content: `${t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください")}\n${apiStatus}`,
           components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
         });
       } else {
@@ -554,9 +562,10 @@ export const handleModal = async (interaction: import("discord.js").ModalSubmitI
 
     const summary = await buildSummary(interaction.guildId, lang);
     const modelRow = await buildModelRow(interaction.guildId, "setting", provider, settings.model);
+    const apiStatus = await buildApiKeyStatus(interaction.guildId, provider, lang);
     await interaction.reply({
       ephemeral: true,
-      content: t(lang, "API key saved.", "APIキーを保存しました。"),
+      content: `${t(lang, "API key saved.", "APIキーを保存しました。")}\n${apiStatus}`,
       components: [modelRow]
     });
     await interaction.followUp({
