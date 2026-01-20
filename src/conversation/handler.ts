@@ -143,7 +143,7 @@ export const handleThreadMessage = async (message: Message) => {
   try {
     plan = await generateToolPlan(adapter, messages);
   } catch (error) {
-    logger.warn({ error }, "LLM planning failed, retrying once");
+    logger.warn({ err: error }, "LLM planning failed, retrying once");
     try {
       const retryMessages = [...messages];
       retryMessages.splice(1, 0, {
@@ -152,7 +152,7 @@ export const handleThreadMessage = async (message: Message) => {
       });
       plan = await generateToolPlan(adapter, retryMessages);
     } catch (retryError) {
-      logger.error({ retryError }, "LLM planning failed");
+      logger.error({ err: retryError }, "LLM planning failed");
       await message.reply("Failed to interpret the request. Please rephrase.");
       await notifyError({
         guild: message.guild,
