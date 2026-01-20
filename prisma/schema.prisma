@@ -1,0 +1,64 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model GuildSettings {
+  guild_id              String   @id
+  provider              String
+  model                 String?
+  confirmation_mode     String   @default("confirm")
+  log_channel_id        String?
+  manager_role_id       String?
+  thread_policy         String   @default("auto-create")
+  thread_archive_minutes Int     @default(4320)
+  rate_limit_per_min    Int      @default(10)
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@index([created_at])
+}
+
+model ProviderCredentials {
+  id               String   @id @default(uuid())
+  guild_id         String
+  provider         String
+  encrypted_api_key String
+  scope            String   @default("guild")
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  @@unique([guild_id, provider])
+}
+
+model ThreadState {
+  thread_id        String   @id
+  guild_id         String
+  owner_user_id    String
+  summary          String?
+  last_messages_hash String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  @@index([guild_id])
+}
+
+model AuditEvent {
+  id                     String   @id @default(uuid())
+  action                 String
+  actor_user_id          String
+  guild_id               String
+  target_id              String?
+  payload_json           Json
+  confirmation_required  Boolean  @default(false)
+  confirmation_status    String   @default("none")
+  status                 String   @default("pending")
+  error_message          String?
+  created_at             DateTime @default(now())
+
+  @@index([guild_id, created_at])
+}
