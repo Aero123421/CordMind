@@ -69,7 +69,8 @@ const buildModelRow = async (
   guildId: string,
   scope: "setup" | "setting",
   provider: ProviderName,
-  current?: string | null
+  current: string | null | undefined,
+  lang: string | null | undefined
 ) => {
   const models = await getProviderModels(guildId, provider);
   const ordered = [...models];
@@ -78,17 +79,19 @@ const buildModelRow = async (
   }
   const trimmed = ordered.filter((model) => model.length > 0 && model.length <= 100);
   const limited = trimmed.slice(0, 24);
+  const providerLabel = t(lang, `Provider: ${provider}`, `プロバイダー: ${provider}`);
   const options = limited.map((model) => ({
     label: model,
     value: model,
+    description: providerLabel,
     default: current === model
   }));
 
-  options.push({ label: "Custom model…", value: "custom", default: false });
+  options.push({ label: "Custom model…", value: "custom", description: providerLabel, default: false });
 
   const select = new StringSelectMenuBuilder()
     .setCustomId(`${scope}:model`)
-    .setPlaceholder("Select model")
+    .setPlaceholder(t(lang, `Select model (${provider})`, `モデルを選択 (${provider})`))
     .addOptions(options);
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 };
@@ -197,8 +200,14 @@ export const handleCommand = async (interaction: ChatInputCommandInteraction) =>
   }
 };
 
-const showModelModal = async (interaction: import("discord.js").StringSelectMenuInteraction | import("discord.js").ButtonInteraction, lang: string | null | undefined) => {
-  const modal = new ModalBuilder().setCustomId(MODEL_MODAL_ID).setTitle(t(lang, "Set model", "モデル設定"));
+const showModelModal = async (
+  interaction: import("discord.js").StringSelectMenuInteraction | import("discord.js").ButtonInteraction,
+  lang: string | null | undefined,
+  provider: ProviderName
+) => {
+  const modal = new ModalBuilder()
+    .setCustomId(MODEL_MODAL_ID)
+    .setTitle(t(lang, `Set model (${provider})`, `モデル設定 (${provider})`));
   const input = new TextInputBuilder()
     .setCustomId(MODEL_INPUT_ID)
     .setLabel(t(lang, "Model name", "モデル名"))
@@ -258,7 +267,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       await updateGuildSettings(interaction.guildId, { provider });
       const nextText = t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください");
       const apiStatus = await buildApiKeyStatus(interaction.guildId, provider, lang);
-      const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model);
+      const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model, lang);
       await interaction.update({
         content: `${nextText}\n${apiStatus}`,
         components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
@@ -268,7 +277,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
     if (scope === "setup" && action === "model") {
       if (value === "custom") {
-        await showModelModal(interaction, lang);
+        await showModelModal(interaction, lang, settings.provider as ProviderName);
         return;
       }
       await updateGuildSettings(interaction.guildId, { model: value });
@@ -301,7 +310,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
           });
           return;
         case "model":
-          const modelRow = await buildModelRow(interaction.guildId, "setting", settings.provider as ProviderName, settings.model);
+          const modelRow = await buildModelRow(interaction.guildId, "setting", settings.provider as ProviderName, settings.model, lang);
           await interaction.update({
             content: t(lang, "Choose model", "モデルを選択してください"),
             components: [modelRow, buildBackRow(lang)]
@@ -376,7 +385,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
     if (scope === "setting" && action === "model") {
       if (value === "custom") {
-        await showModelModal(interaction, lang);
+        await showModelModal(interaction, lang, settings.provider as ProviderName);
         return;
       }
       await updateGuildSettings(interaction.guildId, { model: value });
@@ -421,7 +430,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       const provider = settings.provider as ProviderName;
       const nextText = t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください");
       const apiStatus = await buildApiKeyStatus(interaction.guildId, provider, lang);
-      const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model);
+      const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model, lang);
       await interaction.update({
         content: `${nextText}\n${apiStatus}`,
         components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
@@ -482,7 +491,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       }
 
       if (scope === "setup") {
-        const modelRow = await buildModelRow(interaction.guildId, "setup", settings.provider as ProviderName, settings.model);
+      const modelRow = await buildModelRow(interaction.guildId, "setup", settings.provider as ProviderName, settings.model, lang);
         const apiStatus = await buildApiKeyStatus(interaction.guildId, settings.provider as ProviderName, lang);
         await interaction.update({
           content: `${t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください")}\n${apiStatus}`,
@@ -561,7 +570,7 @@ export const handleModal = async (interaction: import("discord.js").ModalSubmitI
     }
 
     const summary = await buildSummary(interaction.guildId, lang);
-    const modelRow = await buildModelRow(interaction.guildId, "setting", provider, settings.model);
+    const modelRow = await buildModelRow(interaction.guildId, "setting", provider, settings.model, lang);
     const apiStatus = await buildApiKeyStatus(interaction.guildId, provider, lang);
     await interaction.reply({
       ephemeral: true,
