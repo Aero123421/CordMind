@@ -108,7 +108,7 @@ export const handleThreadMessage = async (message: Message) => {
 
   const apiKey = await getDecryptedApiKey(guildId, settings.provider as ProviderName);
   if (!apiKey) {
-    await message.reply("API key not set. Use /discordaimanage api to configure.");
+    await message.reply("API key not set. Use /discordaimanage setting to configure.");
     await notifyError({
       guild: message.guild,
       logChannelId: settings.log_channel_id,
@@ -121,7 +121,7 @@ export const handleThreadMessage = async (message: Message) => {
 
   const model = settings.model ?? "";
   if (!model) {
-    await message.reply("Model not set. Use /discordaimanage model to configure.");
+    await message.reply("Model not set. Use /discordaimanage setting to configure.");
     await notifyError({
       guild: message.guild,
       logChannelId: settings.log_channel_id,

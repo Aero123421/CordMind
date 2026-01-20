@@ -57,9 +57,9 @@ const buildProviderRow = (scope: "setup" | "setting", current?: string | null) =
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 };
 
-const buildContinueRow = (lang: string | null | undefined) => {
+const buildContinueRow = (customId: string, lang: string | null | undefined) => {
   const button = new ButtonBuilder()
-    .setCustomId("setup:provider:next")
+    .setCustomId(customId)
     .setLabel(t(lang, "Next", "次へ"))
     .setStyle(ButtonStyle.Primary);
   return new ActionRowBuilder<ButtonBuilder>().addComponents(button);
@@ -171,7 +171,10 @@ export const handleCommand = async (interaction: ChatInputCommandInteraction) =>
     await interaction.reply({
       ephemeral: true,
       content: "Choose your language / 言語を選択してください (Step 1/3)",
-      components: [buildLanguageRow("setup", settings.language)]
+      components: [
+        buildLanguageRow("setup", settings.language),
+        buildContinueRow("setup:language:next", settings.language)
+      ]
     });
     return;
   }
@@ -237,7 +240,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
           `Step 2/3: Choose your provider (or press Next to keep it)\n${providerLine}: ${settings.provider}`,
           `ステップ2/3: プロバイダーを選択（そのままなら次へ）\n${providerLine}: ${settings.provider}`
         ),
-        components: [buildProviderRow("setup", settings.provider), buildContinueRow(value)]
+        components: [buildProviderRow("setup", settings.provider), buildContinueRow("setup:provider:next", value)]
       });
       return;
     }
@@ -251,7 +254,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model);
       await interaction.update({
         content: `${nextText}\n${apiStatus}`,
-        components: [buildApiKeyRow("setup", lang), modelRow]
+        components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
       });
       return;
     }
@@ -392,6 +395,20 @@ export const handleComponent = async (interaction: import("discord.js").Interact
   if (interaction.isButton()) {
     const [scope, action, subAction] = interaction.customId.split(":");
 
+    if (scope === "setup" && action === "language" && subAction === "next") {
+      const langNow = settings.language;
+      const providerLine = t(langNow, "Current provider", "現在のプロバイダー");
+      await interaction.update({
+        content: t(
+          langNow,
+          `Step 2/3: Choose your provider (or press Next to keep it)\n${providerLine}: ${settings.provider}`,
+          `ステップ2/3: プロバイダーを選択（そのままなら次へ）\n${providerLine}: ${settings.provider}`
+        ),
+        components: [buildProviderRow("setup", settings.provider), buildContinueRow("setup:provider:next", langNow)]
+      });
+      return;
+    }
+
     if (scope === "setup" && action === "provider" && subAction === "next") {
       const provider = settings.provider as ProviderName;
       const hasKey = await hasProviderCredentials(interaction.guildId, provider);
@@ -400,7 +417,18 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model);
       await interaction.update({
         content: `${nextText}\n${apiStatus}`,
-        components: [buildApiKeyRow("setup", lang), modelRow]
+        components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
+      });
+      return;
+    }
+
+    if (scope === "setup" && action === "model" && subAction === "next") {
+      const modelLine = settings.model
+        ? t(lang, `Model set: ${settings.model}`, `モデル設定済み: ${settings.model}`)
+        : t(lang, "Model not set yet.", "モデルは未設定です。");
+      await interaction.update({
+        content: `${t(lang, "Setup complete. Use /discordaimanage setting to adjust anytime.", "セットアップ完了。いつでも /discordaimanage setting から変更できます。")}\n${modelLine}`,
+        components: []
       });
       return;
     }
@@ -450,7 +478,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
         const modelRow = await buildModelRow(interaction.guildId, "setup", settings.provider as ProviderName, settings.model);
         await interaction.update({
           content: t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください"),
-          components: [buildApiKeyRow("setup", lang), modelRow]
+          components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
         });
       } else {
         const summary = await buildSummary(interaction.guildId, lang);
