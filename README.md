@@ -58,6 +58,7 @@ npm run dev
 ```bash
 docker compose up --build
 ```
+このコマンドだけで **DB と Bot が同時に起動**し、起動時に自動で DB スキーマが適用されます。
 
 ## 使い方
 
