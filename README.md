@@ -24,6 +24,19 @@
 - Destructive actions require **Accept / Reject** with **impact preview**
 - Supports **Gemini / xAI / Groq / Cerebras / Z.AI**
 
+## What is CordMind?
+CordMind is a **self-hosted Discord administration assistant**. It turns natural-language requests into safe, allowlisted Discord operations, with strict permission checks and audit logging. It is designed for **small-scale servers (≈ up to 5 guilds)** where safety and clarity matter more than raw throughput.
+
+**Typical use cases**
+- Create / rename / delete channels or roles
+- Update permission overwrites for a role or user
+- Assign / remove roles
+- Inspect server or bot permissions
+
+**What it is not**
+- A general chat bot or entertainment bot
+- A SaaS product (this project is self-hosted)
+
 ## Features
 | Category | Details |
 | --- | --- |
@@ -33,12 +46,37 @@
 | Providers | Gemini, xAI, Groq, Cerebras, Z.AI |
 | Storage | Encrypted API keys (AES-256-GCM) + short-term audit logs |
 
-## Architecture (Minimal)
+## Architecture (Detailed)
 ```
-User -> @mention -> Thread
-               -> LLM (structured JSON)
-               -> Tool Layer (allowlist)
-               -> Audit Log
+                       +-----------------------------+
+                       |        Discord Server       |
+                       |  User -> @mention -> Thread |
+                       +--------------+--------------+
+                                      |
+                                      v
+                        +---------------------------+
+                        |   CordMind (discord.js)   |
+                        +-----+-----------+---------+
+                              |           |
+                +-------------+           +--------------------+
+                |                                         |
+       +--------v--------+                       +--------v--------+
+       | Conversation    |                       | Slash Commands  |
+       | Manager         |                       | /discordaimanage|
+       +--------+--------+                       +--------+--------+
+                |                                         |
+       +--------v--------+                       +--------v--------+
+       | LLM Adapter     |                       | Settings / DB   |
+       | (Gemini/xAI/...)|                       | + Encryption    |
+       +--------+--------+                       +--------+--------+
+                |                                         |
+       +--------v--------+                       +--------v--------+
+       | Tool Layer      |                       | Audit Log        |
+       | (Allowlist)     |                       | DB + Log Channel |
+       +--------+--------+                       +------------------+
+                |
+                v
+        Discord API (channels/roles/permissions)
 ```
 
 ## Quick Start (Docker)
@@ -121,6 +159,19 @@ DB_WAIT_RETRIES=30
 - 破壊的操作は **Accept / Reject** の確認 + **影響範囲表示**
 - **Gemini / xAI / Groq / Cerebras / Z.AI** 対応
 
+## CordMind とは
+CordMind は **自己ホスト型のDiscord管理アシスタント** です。自然言語の指示を安全なDiscord操作に変換し、厳格な権限チェックと監査ログによって安全性を担保します。**小規模運用（目安: 最大5ギルド）** を前提としています。
+
+**主な用途**
+- チャンネル / ロールの作成・名称変更・削除
+- ロールやユーザーの権限上書き更新
+- ロール付与 / 削除
+- 権限（ユーザー/ボット）の確認
+
+**対象外**
+- 雑談や娯楽向けのチャットBot
+- SaaS型のクラウドサービス
+
 ## 特徴
 | 分類 | 内容 |
 | --- | --- |
@@ -130,12 +181,37 @@ DB_WAIT_RETRIES=30
 | プロバイダー | Gemini / xAI / Groq / Cerebras / Z.AI |
 | 保存 | APIキー暗号化（AES-256-GCM）+ 短期監査ログ |
 
-## アーキテクチャ（最小構成）
+## アーキテクチャ（詳細）
 ```
-User -> @mention -> Thread
-               -> LLM（構造化JSON）
-               -> Tool Layer（許可制）
-               -> 監査ログ
+                       +-----------------------------+
+                       |        Discord Server       |
+                       |  User -> @mention -> Thread |
+                       +--------------+--------------+
+                                      |
+                                      v
+                        +---------------------------+
+                        |   CordMind (discord.js)   |
+                        +-----+-----------+---------+
+                              |           |
+                +-------------+           +--------------------+
+                |                                         |
+       +--------v--------+                       +--------v--------+
+       | Conversation    |                       | Slash Commands  |
+       | Manager         |                       | /discordaimanage|
+       +--------+--------+                       +--------+--------+
+                |                                         |
+       +--------v--------+                       +--------v--------+
+       | LLM Adapter     |                       | Settings / DB   |
+       | (Gemini/xAI/...)|                       | + Encryption    |
+       +--------+--------+                       +--------+--------+
+                |                                         |
+       +--------v--------+                       +--------v--------+
+       | Tool Layer      |                       | Audit Log        |
+       | (Allowlist)     |                       | DB + Log Channel |
+       +--------+--------+                       +------------------+
+                |
+                v
+        Discord API (channels/roles/permissions)
 ```
 
 ## クイックスタート（Docker）
