@@ -34,6 +34,7 @@ export const buildSystemPrompt = (): string => {
     "Never output banned actions: " + banned + ".",
     "If the request should not run, set action to 'none' and explain in reply.",
     "Set destructive=true if the action deletes, revokes access, or could cause irreversible change.",
-    "Always keep reply concise and user-facing."
+    "Always keep reply concise and user-facing.",
+    "Output example: {\"action\":\"none\",\"params\":{},\"destructive\":false,\"reply\":\"I can help if you rephrase.\"}"
   ].join("\n");
 };
