@@ -1,96 +1,56 @@
-# CordMind (Discord AI Manager)
+<div align="center">
 
-A Discord administration bot that lets you manage servers via natural language. Mention the bot to create a dedicated Thread, then continue the conversation without further mentions. Destructive operations always require confirmation (Accept / Reject) and show impact details.
+# CordMind
 
-JP: 自然言語でDiscordサーバーを管理できるBotです。@メンションで専用Threadを作成し、以降はメンション不要で会話できます。破壊的操作は必ず二段階確認（Accept / Reject）と影響範囲表示を行います。
+**Discord AI Manager** — Manage your Discord server with natural language.
 
----
+![node](https://img.shields.io/badge/node-%3E%3D20-43853d?style=flat-square)
+![docker](https://img.shields.io/badge/docker-ready-2496ed?style=flat-square)
+![status](https://img.shields.io/badge/status-alpha-ff7a59?style=flat-square)
 
-## Table of Contents
-- Overview
-- Features
-- Requirements
-- Quick Start (Docker)
-- Configuration (.env)
-- Usage
-- Slash Commands
-- LLM Providers
-- Rate Limits
-- Audit Logs
-- Troubleshooting
-- Development
+[English](#en) | [日本語](#jp)
+
+</div>
 
 ---
 
-## Overview
-**English**
-- Mention the bot to open a dedicated Thread
-- Continue inside the Thread without further mentions (requires Message Content Intent)
-- Destructive actions require confirmation and impact preview
+<a id="en"></a>
 
-**日本語**
-- Botにメンションすると専用Threadを作成
-- Thread内はメンション不要（Message Content Intent必須）
-- 破壊的操作は確認＋影響範囲の提示
+# English
 
----
+## At a Glance
+- Mention the bot to create a **dedicated Thread**
+- Continue **without further mentions** (Message Content Intent required)
+- Destructive actions require **Accept / Reject** with **impact preview**
+- Supports **Gemini / xAI / Groq / Cerebras / Z.AI**
 
 ## Features
-**English**
-- Dedicated Thread per request
-- Confirmation UI for destructive operations
-- Impact preview (channels / roles / members / permissions)
-- Provider switching (Gemini / xAI / Groq / Cerebras / Z.AI)
-- Encrypted API key storage (AES-256-GCM)
-- Short-term audit logs with optional log channel
+| Category | Details |
+| --- | --- |
+| Conversation | One request = one Thread; no further mentions needed |
+| Safety | Confirmation UI + impact preview (channels/roles/members/permissions) |
+| Governance | Admin / Manager role only |
+| Providers | Gemini, xAI, Groq, Cerebras, Z.AI |
+| Storage | Encrypted API keys (AES-256-GCM) + short-term audit logs |
 
-**日本語**
-- 1依頼=1Thread
-- 破壊的操作の二段階確認
-- 影響範囲表示（チャンネル/ロール/メンバー/権限）
-- プロバイダー切替（Gemini / xAI / Groq / Cerebras / Z.AI）
-- APIキーの暗号化保存（AES-256-GCM）
-- 短期監査ログ + 任意ログチャンネル
-
----
-
-## Requirements
-**English**
-- Node.js 20+ (LTS)
-- Docker (recommended)
-- Discord Application (Bot)
-- Postgres 16
-
-**日本語**
-- Node.js 20+ (LTS)
-- Docker 推奨
-- Discord Bot アプリ
-- Postgres 16
-
----
+## Architecture (Minimal)
+```
+User -> @mention -> Thread
+               -> LLM (structured JSON)
+               -> Tool Layer (allowlist)
+               -> Audit Log
+```
 
 ## Quick Start (Docker)
-**English**
-1) Create `.env`
-2) Run a single command to start DB + Bot
+1) Create `.env` (see below)
+2) Run one command (DB + Bot + schema)
 
 ```bash
 docker compose up --build
 ```
-
-**日本語**
-1) `.env` を作成
-2) DB と Bot を一括起動
-
-```bash
-docker compose up --build
-```
-
----
 
 ## Configuration (.env)
-**English**
-Minimal required values:
+**Required**
 ```
 DISCORD_TOKEN=...
 DISCORD_CLIENT_ID=...
@@ -102,8 +62,92 @@ Generate encryption key:
 openssl rand -base64 32
 ```
 
-**日本語**
-最低限必要な環境変数:
+**Optional**
+```
+DISCORD_GUILD_ID=...        # dev-only slash commands
+DEFAULT_PROVIDER=gemini
+DEFAULT_MODEL=...
+AUDIT_RETENTION_DAYS=7
+DB_WAIT_RETRIES=30
+```
+
+## Usage
+1) Mention the bot in a server channel
+2) A dedicated Thread is created
+3) Continue inside the Thread without mentions
+4) Destructive actions require Accept / Reject
+
+## Slash Commands
+| Command | Description |
+| --- | --- |
+| `/discordaimanage setup` | Setup guidance |
+| `/discordaimanage provider` | Set provider |
+| `/discordaimanage api` | Set/reset/clear API key |
+| `/discordaimanage model` | Set model |
+| `/discordaimanage role` | Set manager role (optional) |
+| `/discordaimanage log` | Set audit log channel (optional) |
+| `/discordaimanage thread` | Thread archive minutes |
+| `/discordaimanage rate` | Ops per minute |
+| `/discordaimanage show` | Show current settings |
+
+## Rate Limits
+- General operations: `rate_limit_per_min` (default 10)
+- Destructive operations: **2 / minute** (fixed)
+
+## Audit Logs
+- Destructive actions are recorded
+- Short-term retention (default 7 days)
+- Optional Discord log channel
+
+## Troubleshooting
+- Thread messages are empty → enable **Message Content Intent** in Developer Portal
+- API key missing → `/discordaimanage api`
+- Model not set → `/discordaimanage model`
+
+## Development
+- Plans: `docs/plan/`
+- Build: `npm run build`
+- DB sync: `npm run db:push`
+
+---
+
+<a id="jp"></a>
+
+# 日本語
+
+## 概要
+- Bot を @メンションすると **専用Thread** を作成
+- Thread 内は **メンション不要**（Message Content Intent 必須）
+- 破壊的操作は **Accept / Reject** の確認 + **影響範囲表示**
+- **Gemini / xAI / Groq / Cerebras / Z.AI** 対応
+
+## 特徴
+| 分類 | 内容 |
+| --- | --- |
+| 会話 | 1依頼=1Thread / Thread内はメンション不要 |
+| 安全 | 確認UI + 影響範囲表示（チャンネル/ロール/メンバー/権限） |
+| 権限 | 管理者 or 管理ロールのみ操作可能 |
+| プロバイダー | Gemini / xAI / Groq / Cerebras / Z.AI |
+| 保存 | APIキー暗号化（AES-256-GCM）+ 短期監査ログ |
+
+## アーキテクチャ（最小構成）
+```
+User -> @mention -> Thread
+               -> LLM（構造化JSON）
+               -> Tool Layer（許可制）
+               -> 監査ログ
+```
+
+## クイックスタート（Docker）
+1) `.env` を作成（下記参照）
+2) 1コマンドで DB + Bot を起動
+
+```bash
+docker compose up --build
+```
+
+## 設定 (.env)
+**必須**
 ```
 DISCORD_TOKEN=...
 DISCORD_CLIENT_ID=...
@@ -115,113 +159,53 @@ DISCORDAI_ENCRYPTION_KEY=...   # base64(32 bytes)
 openssl rand -base64 32
 ```
 
----
+**任意**
+```
+DISCORD_GUILD_ID=...        # 開発用スラッシュコマンド
+DEFAULT_PROVIDER=gemini
+DEFAULT_MODEL=...
+AUDIT_RETENTION_DAYS=7
+DB_WAIT_RETRIES=30
+```
 
-## Usage
-**English**
-1) Mention the bot in a server channel
-2) A dedicated Thread is created
-3) Continue conversation inside the Thread without mentions
-4) Destructive actions require Accept / Reject
-
-**日本語**
+## 使い方
 1) サーバー内でBotにメンション
-2) 専用Threadが作成
+2) 専用Threadが作成される
 3) Thread内でメンション不要で会話
-4) 破壊的操作はAccept / Rejectで確認
+4) 破壊的操作は Accept / Reject で確認
 
----
+## スラッシュコマンド
+| コマンド | 説明 |
+| --- | --- |
+| `/discordaimanage setup` | セットアップ案内 |
+| `/discordaimanage provider` | プロバイダー設定 |
+| `/discordaimanage api` | APIキー設定/再設定/削除 |
+| `/discordaimanage model` | モデル設定 |
+| `/discordaimanage role` | 管理ロール設定（任意） |
+| `/discordaimanage log` | 監査ログチャンネル設定（任意） |
+| `/discordaimanage thread` | Threadアーカイブ時間 |
+| `/discordaimanage rate` | 1分あたりの操作数 |
+| `/discordaimanage show` | 設定内容を表示 |
 
-## Slash Commands
-**English**
-- `setup` : Show setup steps
-- `provider` : Set LLM provider
-- `api` : Set/reset/clear API key
-- `model` : Set model
-- `role` : Set manager role (optional)
-- `log` : Set audit log channel (optional)
-- `thread` : Set thread archive minutes
-- `rate` : Set rate limit per minute
-- `show` : Show current settings
-
-**日本語**
-- `setup` : セットアップ手順表示
-- `provider` : LLMプロバイダー設定
-- `api` : APIキー設定/再設定/削除
-- `model` : モデル設定
-- `role` : 管理ロール設定（任意）
-- `log` : 監査ログチャンネル設定（任意）
-- `thread` : Threadアーカイブ時間
-- `rate` : 1分あたりの操作数上限
-- `show` : 現在設定を表示
-
----
-
-## LLM Providers
-**English**
-- Gemini
-- xAI
-- Groq
-- Cerebras
-- Z.AI
-
-**日本語**
-- Gemini
-- xAI
-- Groq
-- Cerebras
-- Z.AI
-
----
-
-## Rate Limits
-**English**
-- General operations: `rate_limit_per_min` (default 10)
-- Destructive operations: 2 per minute (fixed)
-
-**日本語**
+## レート制限
 - 通常操作: `rate_limit_per_min`（デフォルト10）
-- 破壊的操作: 1分あたり2回（固定）
+- 破壊的操作: **1分あたり2回**（固定）
 
----
-
-## Audit Logs
-**English**
-- Destructive actions are recorded
-- Logs are retained short-term (default 7 days)
-- Optional Discord log channel
-
-**日本語**
+## 監査ログ
 - 破壊的操作は必ず記録
-- 監査ログは短期保管（デフォルト7日）
+- 短期保管（デフォルト7日）
 - Discordログチャンネルは任意
 
----
-
-## Troubleshooting
-**English**
-- Thread messages are empty → Enable Message Content Intent in Discord Developer Portal
-- API key missing → Use `/discordaimanage api`
-- Model not set → Use `/discordaimanage model`
-
-**日本語**
-- Thread内メッセージが空 → Message Content Intent を有効化
+## トラブルシュート
+- Thread内メッセージが空 → **Message Content Intent** を有効化
 - APIキー未設定 → `/discordaimanage api`
 - モデル未設定 → `/discordaimanage model`
 
----
-
-## Development
-**English**
-- Plans: `docs/plan/`
-- Build: `npm run build`
-- DB sync: `npm run db:push`
-
-**日本語**
+## 開発
 - 計画書: `docs/plan/`
 - ビルド: `npm run build`
 - DB同期: `npm run db:push`
 
 ---
 
-If you want more sections (architecture diagram, screenshots, etc.), tell me and I will add them.
+[Back to English](#en)
