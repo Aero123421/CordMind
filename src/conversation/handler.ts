@@ -274,17 +274,10 @@ export const handleThreadMessage = async (message: Message) => {
   );
   if (destructiveActions.length > 0) {
     const remainingDestructive = getRateLimitRemaining(`destructive:${guildId}`, DESTRUCTIVE_LIMIT_PER_MIN);
-    if (destructiveActions.length > remainingDestructive) {
-      await message.reply("Destructive action rate limit exceeded. Try again later.");
-      await notifyError({
-        guild: message.guild,
-        logChannelId: settings.log_channel_id,
-        actorTag: message.author.tag,
-        action: "rate_limit_destructive",
-        message: "Destructive action rate limit exceeded."
-      });
-      return;
-    }
+    const destructiveWarning =
+      destructiveActions.length > remainingDestructive
+        ? "注意: 破壊的操作のレート制限を超えていますが、確認のみ行います。"
+        : "";
 
     let impact: Impact = {};
     for (const action of destructiveActions) {
@@ -326,7 +319,7 @@ export const handleThreadMessage = async (message: Message) => {
     }
 
     await message.reply({
-      content: `${plan.reply}\n\n操作内容:\n${summarizeActions(actions)}\n\n影響範囲:\n${formatImpact(impact)}\n\nAccept or Reject?`,
+      content: `${plan.reply}\n\n${destructiveWarning ? `${destructiveWarning}\n\n` : ""}操作内容:\n${summarizeActions(actions)}\n\n影響範囲:\n${formatImpact(impact)}\n\nAccept or Reject?`,
       components: [confirmationRow(audit.id)]
     });
     return;
