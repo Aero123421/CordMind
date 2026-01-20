@@ -14,6 +14,7 @@ export const getGuildSettings = async (guildId: string) => {
       guild_id: guildId,
       provider: config.defaultProvider,
       model: config.defaultModel,
+      language: "en",
       confirmation_mode: "confirm",
       log_channel_id: null,
       manager_role_id: null,

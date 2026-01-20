@@ -9,7 +9,7 @@ import {
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { buildCommands } from "./interactions/commands.js";
-import { handleCommand, handleApiModal, getApiModalId } from "./interactions/handlers.js";
+import { handleCommand, handleComponent, handleModal } from "./interactions/handlers.js";
 import { handleThreadMessage, handleConfirmation } from "./conversation/handler.js";
 import { getGuildSettings } from "./settings.js";
 import { isAuthorized } from "./permissions.js";
@@ -66,13 +66,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    if (interaction.isModalSubmit() && interaction.customId === getApiModalId()) {
-      await handleApiModal(interaction);
+    if (interaction.isModalSubmit()) {
+      await handleModal(interaction);
       return;
     }
 
     if (interaction.isButton()) {
-      await handleConfirmation(interaction);
+      if (interaction.customId.startsWith("confirm:") || interaction.customId.startsWith("reject:")) {
+        await handleConfirmation(interaction);
+        return;
+      }
+      await handleComponent(interaction);
+      return;
+    }
+
+    if (interaction.isStringSelectMenu() || interaction.isChannelSelectMenu() || interaction.isRoleSelectMenu()) {
+      await handleComponent(interaction);
+      return;
     }
   } catch (error) {
     logger.error({ error }, "Interaction handling failed");

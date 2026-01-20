@@ -108,10 +108,9 @@ Discord サーバーに戻って確認します。
 1.  **指示**: Bot にメンションして指示を送ります。
     > `@CordMind モデレーター専用のチャンネルを作って`
 2.  **計画と承認**: Bot が操作内容を提案（Diff表示）するので、`Accept` ボタンを押して実行します。
-3.  **設定変更**: LLMの変更などは `/discordaimanage` コマンドで行います。
-    *   `/discordaimanage api`: APIキーの設定
-    *   `/discordaimanage model`: モデルの変更
-    *   `/discordaimanage provider`: プロバイダの変更 (Gemini, xAI, etc.)
+3.  **設定変更**: 対話型メニューで設定します。
+    *   `/discordaimanage setup`: 初回セットアップ（言語→プロバイダー→APIキー→モデル）
+    *   `/discordaimanage setting`: いつでも再設定可能（対話型メニュー）
 
 ---
 

@@ -11,6 +11,7 @@ model GuildSettings {
   guild_id              String   @id
   provider              String
   model                 String?
+  language              String   @default("en")
   confirmation_mode     String   @default("confirm")
   log_channel_id        String?
   manager_role_id       String?

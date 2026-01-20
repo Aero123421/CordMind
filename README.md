@@ -109,10 +109,9 @@ Go back to your Discord server.
 1.  **Request**: Mention the bot (`@CordMind`) with your request.
     > `@CordMind Create a private channel for moderators.`
 2.  **Plan & Review**: The bot proposes a plan (showing a Diff). Click `Accept` to execute.
-3.  **Manage Settings**: Use slash commands to configure the bot.
-    *   `/discordaimanage api`: Set LLM API keys.
-    *   `/discordaimanage model`: Change the AI model.
-    *   `/discordaimanage provider`: Switch providers (Gemini, xAI, etc.).
+3.  **Manage Settings**: Use interactive menus.
+    *   `/discordaimanage setup`: First-time setup (language → provider → API key → model).
+    *   `/discordaimanage setting`: Change settings anytime (interactive menu).
 
 ---
 
