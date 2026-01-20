@@ -57,6 +57,14 @@ const buildProviderRow = (scope: "setup" | "setting", current?: string | null) =
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
 };
 
+const buildContinueRow = (lang: string | null | undefined) => {
+  const button = new ButtonBuilder()
+    .setCustomId("setup:provider:next")
+    .setLabel(t(lang, "Next", "次へ"))
+    .setStyle(ButtonStyle.Primary);
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(button);
+};
+
 const buildModelRow = async (
   guildId: string,
   scope: "setup" | "setting",
@@ -222,9 +230,14 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
     if (scope === "setup" && action === "language") {
       await updateGuildSettings(interaction.guildId, { language: value });
+      const providerLine = t(value, "Current provider", "現在のプロバイダー");
       await interaction.update({
-        content: t(value, "Step 2/3: Choose your provider", "ステップ2/3: プロバイダーを選択してください"),
-        components: [buildProviderRow("setup", settings.provider)]
+        content: t(
+          value,
+          `Step 2/3: Choose your provider (or press Next to keep it)\n${providerLine}: ${settings.provider}`,
+          `ステップ2/3: プロバイダーを選択（そのままなら次へ）\n${providerLine}: ${settings.provider}`
+        ),
+        components: [buildProviderRow("setup", settings.provider), buildContinueRow(value)]
       });
       return;
     }
@@ -378,6 +391,19 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
   if (interaction.isButton()) {
     const [scope, action, subAction] = interaction.customId.split(":");
+
+    if (scope === "setup" && action === "provider" && subAction === "next") {
+      const provider = settings.provider as ProviderName;
+      const hasKey = await hasProviderCredentials(interaction.guildId, provider);
+      const nextText = t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください");
+      const apiStatus = hasKey ? t(lang, "API key set", "APIキー設定済み") : t(lang, "API key not set", "APIキー未設定");
+      const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model);
+      await interaction.update({
+        content: `${nextText}\n${apiStatus}`,
+        components: [buildApiKeyRow("setup", lang), modelRow]
+      });
+      return;
+    }
 
     if (interaction.customId === "setting:back") {
       const summary = await buildSummary(interaction.guildId, lang);
