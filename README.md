@@ -73,6 +73,18 @@ CordMind is a **self-hosted Discord administration assistant**. It turns natural
 - View Channels
 - Manage Messages (for pinning)
 
+## Discord Developer Portal Settings
+**English (what to enable)**
+1) **Bot → Privileged Gateway Intents**
+   - Enable **Message Content Intent** (required for Thread messages without mentions)
+   - Enable **Server Members Intent** (role checks)
+2) **Bot → Permissions**
+   - Grant the permissions listed above (Manage Channels/Roles/Threads, etc.)
+3) **OAuth2 → URL Generator**
+   - Scopes: `bot`, `applications.commands`
+   - Bot Permissions: same as above
+   - Use the generated URL to invite the bot
+
 ## Security Model
 - **Principle of least privilege**: Only allowlisted tools can execute
 - **Explicit confirmation**: destructive actions require Accept / Reject
@@ -242,6 +254,18 @@ CordMind は **自己ホスト型のDiscord管理アシスタント** です。�
 - メッセージ送信
 - チャンネル閲覧
 - メッセージの管理（ピン留め用）
+
+## Discord 開発者ポータル設定
+**日本語（設定する項目）**
+1) **Bot → Privileged Gateway Intents**
+   - **Message Content Intent** を有効化（Thread内メンション不要のため必須）
+   - **Server Members Intent** を有効化（ロールチェック用）
+2) **Bot → Permissions**
+   - 上記の推奨権限を付与
+3) **OAuth2 → URL Generator**
+   - Scopes: `bot`, `applications.commands`
+   - Bot Permissions: 上記と同じ
+   - 生成されたURLでBotを招待
 
 ## セキュリティモデル
 - **最小権限**: Allowlist 以外の操作は実行不可
