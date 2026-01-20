@@ -1,115 +1,227 @@
-# Discord AI Manager
+# CordMind (Discord AI Manager)
 
-Discord サーバー管理を自然言語で実行するための Bot です。@メンションで専用 Thread を作成し、以降は Thread 内でメンション不要で会話できます。破壊的操作は必ず二段階確認（Accept / Reject）を挟みます。
+A Discord administration bot that lets you manage servers via natural language. Mention the bot to create a dedicated Thread, then continue the conversation without further mentions. Destructive operations always require confirmation (Accept / Reject) and show impact details.
 
-## 特徴
-- @メンション → 専用 Thread 自動作成
-- Thread 内はメンション不要（Message Content Intent 必須）
-- 破壊的操作は二段階確認 + 影響範囲表示
-- 禁止操作: サーバー削除 / Bot 自身の BAN・KICK・TIMEOUT
-- 監査ログは短期保管（デフォルト 7 日）
-- LLM プロバイダー切替（Gemini / xAI / Groq / Cerebras / Z.AI）
-- /discordaimanage で設定 UI
+JP: 自然言語でDiscordサーバーを管理できるBotです。@メンションで専用Threadを作成し、以降はメンション不要で会話できます。破壊的操作は必ず二段階確認（Accept / Reject）と影響範囲表示を行います。
 
-## 必要条件
+---
+
+## Table of Contents
+- Overview
+- Features
+- Requirements
+- Quick Start (Docker)
+- Configuration (.env)
+- Usage
+- Slash Commands
+- LLM Providers
+- Rate Limits
+- Audit Logs
+- Troubleshooting
+- Development
+
+---
+
+## Overview
+**English**
+- Mention the bot to open a dedicated Thread
+- Continue inside the Thread without further mentions (requires Message Content Intent)
+- Destructive actions require confirmation and impact preview
+
+**日本語**
+- Botにメンションすると専用Threadを作成
+- Thread内はメンション不要（Message Content Intent必須）
+- 破壊的操作は確認＋影響範囲の提示
+
+---
+
+## Features
+**English**
+- Dedicated Thread per request
+- Confirmation UI for destructive operations
+- Impact preview (channels / roles / members / permissions)
+- Provider switching (Gemini / xAI / Groq / Cerebras / Z.AI)
+- Encrypted API key storage (AES-256-GCM)
+- Short-term audit logs with optional log channel
+
+**日本語**
+- 1依頼=1Thread
+- 破壊的操作の二段階確認
+- 影響範囲表示（チャンネル/ロール/メンバー/権限）
+- プロバイダー切替（Gemini / xAI / Groq / Cerebras / Z.AI）
+- APIキーの暗号化保存（AES-256-GCM）
+- 短期監査ログ + 任意ログチャンネル
+
+---
+
+## Requirements
+**English**
 - Node.js 20+ (LTS)
-- Docker (任意: DB をコンテナで立ち上げる場合)
+- Docker (recommended)
+- Discord Application (Bot)
+- Postgres 16
+
+**日本語**
+- Node.js 20+ (LTS)
+- Docker 推奨
 - Discord Bot アプリ
 - Postgres 16
 
-## セットアップ
+---
 
-### 1) リポジトリ準備
+## Quick Start (Docker)
+**English**
+1) Create `.env`
+2) Run a single command to start DB + Bot
+
 ```bash
-npm install
+docker compose up --build
 ```
 
-### 2) 環境変数
-`.env.example` をコピーして `.env` を作成し、以下を設定してください。
+**日本語**
+1) `.env` を作成
+2) DB と Bot を一括起動
 
-```env
-DISCORD_TOKEN=
-DISCORD_CLIENT_ID=
-DISCORD_GUILD_ID= # 開発時のみ任意
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/discordai?schema=public
-DISCORDAI_ENCRYPTION_KEY=
+```bash
+docker compose up --build
 ```
 
-`DISCORDAI_ENCRYPTION_KEY` は 32 bytes の base64 です。
+---
+
+## Configuration (.env)
+**English**
+Minimal required values:
+```
+DISCORD_TOKEN=...
+DISCORD_CLIENT_ID=...
+DATABASE_URL=postgresql://postgres:postgres@db:5432/discordai?schema=public
+DISCORDAI_ENCRYPTION_KEY=...   # base64(32 bytes)
+```
+Generate encryption key:
 ```bash
 openssl rand -base64 32
 ```
 
-### 3) Discord 開発者ポータル設定
-- **Message Content Intent** を有効化
-- Bot に必要な権限を付与（チャンネル/ロール/権限編集など）
-
-### 4) DB 準備
+**日本語**
+最低限必要な環境変数:
+```
+DISCORD_TOKEN=...
+DISCORD_CLIENT_ID=...
+DATABASE_URL=postgresql://postgres:postgres@db:5432/discordai?schema=public
+DISCORDAI_ENCRYPTION_KEY=...   # base64(32 bytes)
+```
+暗号化キー生成:
 ```bash
-npm run db:push
+openssl rand -base64 32
 ```
 
-### 5) 起動
-```bash
-npm run dev
-```
+---
 
-## Docker で起動
-```bash
-docker compose up --build
-```
-このコマンドだけで **DB と Bot が同時に起動**し、起動時に自動で DB スキーマが適用されます。
+## Usage
+**English**
+1) Mention the bot in a server channel
+2) A dedicated Thread is created
+3) Continue conversation inside the Thread without mentions
+4) Destructive actions require Accept / Reject
 
-## 使い方
+**日本語**
+1) サーバー内でBotにメンション
+2) 専用Threadが作成
+3) Thread内でメンション不要で会話
+4) 破壊的操作はAccept / Rejectで確認
 
-### 1) Bot を @メンション
-メンションすると専用 Thread が作成されます。
+---
 
-### 2) Thread 内で操作
-Thread 内はメンション不要で会話できます。
+## Slash Commands
+**English**
+- `setup` : Show setup steps
+- `provider` : Set LLM provider
+- `api` : Set/reset/clear API key
+- `model` : Set model
+- `role` : Set manager role (optional)
+- `log` : Set audit log channel (optional)
+- `thread` : Set thread archive minutes
+- `rate` : Set rate limit per minute
+- `show` : Show current settings
 
-### 3) 破壊的操作
-Accept / Reject ボタンで二段階確認が必要です。操作内容と影響範囲が表示されます。
-
-## /discordaimanage コマンド
-- `setup` : セットアップ手順の表示
-- `provider` : プロバイダー変更
-- `api` : API キー設定（再設定可）
-- `model` : モデル変更
+**日本語**
+- `setup` : セットアップ手順表示
+- `provider` : LLMプロバイダー設定
+- `api` : APIキー設定/再設定/削除
+- `model` : モデル設定
 - `role` : 管理ロール設定（任意）
 - `log` : 監査ログチャンネル設定（任意）
-- `thread` : Thread アーカイブ時間設定
+- `thread` : Threadアーカイブ時間
 - `rate` : 1分あたりの操作数上限
-- `show` : 設定内容を表示
+- `show` : 現在設定を表示
 
-設定フローは「プロバイダー選択 → API 入力 → モデル選択」です。
+---
 
-## LLM プロバイダー
+## LLM Providers
+**English**
 - Gemini
 - xAI
 - Groq
 - Cerebras
 - Z.AI
 
-API キーは DB に AES-256-GCM で暗号化保存します。
+**日本語**
+- Gemini
+- xAI
+- Groq
+- Cerebras
+- Z.AI
 
-## レート制限
-- 通常操作: ギルド単位 `rate_limit_per_min`（デフォルト 10）
-- 破壊的操作: 1分あたり 2 回
+---
 
-## 監査ログ
-- 破壊的操作は必ずログに記録
-- 監査ログはデフォルト 7 日で削除
-- `AUDIT_RETENTION_DAYS` で保持日数を変更可能
+## Rate Limits
+**English**
+- General operations: `rate_limit_per_min` (default 10)
+- Destructive operations: 2 per minute (fixed)
 
-## よくある質問
+**日本語**
+- 通常操作: `rate_limit_per_min`（デフォルト10）
+- 破壊的操作: 1分あたり2回（固定）
 
-### Thread 内メンション不要は可能？
-可能です。**Message Content Intent** を有効化してください。
+---
 
-### API キー設定済みなのに再設定したい
-`/discordaimanage api` から再設定できます。
+## Audit Logs
+**English**
+- Destructive actions are recorded
+- Logs are retained short-term (default 7 days)
+- Optional Discord log channel
 
-## 開発メモ
-- 実装計画書は `docs/plan/` にあります。
-- 仕様変更があれば plan を更新してください。
+**日本語**
+- 破壊的操作は必ず記録
+- 監査ログは短期保管（デフォルト7日）
+- Discordログチャンネルは任意
+
+---
+
+## Troubleshooting
+**English**
+- Thread messages are empty → Enable Message Content Intent in Discord Developer Portal
+- API key missing → Use `/discordaimanage api`
+- Model not set → Use `/discordaimanage model`
+
+**日本語**
+- Thread内メッセージが空 → Message Content Intent を有効化
+- APIキー未設定 → `/discordaimanage api`
+- モデル未設定 → `/discordaimanage model`
+
+---
+
+## Development
+**English**
+- Plans: `docs/plan/`
+- Build: `npm run build`
+- DB sync: `npm run db:push`
+
+**日本語**
+- 計画書: `docs/plan/`
+- ビルド: `npm run build`
+- DB同期: `npm run db:push`
+
+---
+
+If you want more sections (architecture diagram, screenshots, etc.), tell me and I will add them.
