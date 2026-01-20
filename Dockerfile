@@ -5,6 +5,7 @@ WORKDIR /app
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
+COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npm install
 
 COPY . .
@@ -17,6 +18,7 @@ WORKDIR /app
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
+COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npm install --omit=dev
 
 COPY --from=builder /app/dist ./dist
