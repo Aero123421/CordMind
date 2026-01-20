@@ -46,6 +46,41 @@ CordMind is a **self-hosted Discord administration assistant**. It turns natural
 | Providers | Gemini, xAI, Groq, Cerebras, Z.AI |
 | Storage | Encrypted API keys (AES-256-GCM) + short-term audit logs |
 
+## Use Cases (Examples)
+- “Create a private channel for the mods and give it only Moderator role access.”  
+- “Rename #general to #lobby.”  
+- “List all roles and show details for the ‘Moderator’ role.”  
+- “Remove the Temp role from user 123.”  
+- “Update permissions so @Newcomer can read #rules only.”  
+
+## Permissions / Required Discord Scopes
+**Application scopes**
+- `bot`
+- `applications.commands`
+
+**Required Gateway Intents**
+- `Guilds`
+- `GuildMessages`
+- `MessageContent` (required for Thread messages without mentions)
+- `GuildMembers` (role checks)
+
+**Bot permissions (recommended)**
+- Manage Channels
+- Manage Roles
+- Manage Threads
+- Read Message History
+- Send Messages
+- View Channels
+- Manage Messages (for pinning)
+
+## Security Model
+- **Principle of least privilege**: Only allowlisted tools can execute
+- **Explicit confirmation**: destructive actions require Accept / Reject
+- **Impact preview**: shows affected channels/roles/members/permissions before execution
+- **Role-based authorization**: Admin or configured manager role only
+- **API key protection**: AES-256-GCM encrypted at rest
+- **Audit logging**: destructive actions are recorded (short-term retention)
+
 ## Architecture (Detailed)
 ```
                        +-----------------------------+
@@ -180,6 +215,41 @@ CordMind は **自己ホスト型のDiscord管理アシスタント** です。�
 | 権限 | 管理者 or 管理ロールのみ操作可能 |
 | プロバイダー | Gemini / xAI / Groq / Cerebras / Z.AI |
 | 保存 | APIキー暗号化（AES-256-GCM）+ 短期監査ログ |
+
+## Use Cases（具体例）
+- 「モデレーター専用の非公開チャンネルを作成して権限を付与して」  
+- 「#general を #lobby にリネームして」  
+- 「ロール一覧を表示して “Moderator” の詳細を教えて」  
+- 「ユーザー123から Temp ロールを外して」  
+- 「@Newcomer が #rules だけ読めるように権限を更新して」  
+
+## 必要権限 / Discord Scopes
+**Application scopes**
+- `bot`
+- `applications.commands`
+
+**必要な Gateway Intents**
+- `Guilds`
+- `GuildMessages`
+- `MessageContent`（Thread内メンション不要のため必須）
+- `GuildMembers`（ロールチェック用）
+
+**推奨 Bot 権限**
+- チャンネル管理
+- ロール管理
+- スレッド管理
+- メッセージ履歴の閲覧
+- メッセージ送信
+- チャンネル閲覧
+- メッセージの管理（ピン留め用）
+
+## セキュリティモデル
+- **最小権限**: Allowlist 以外の操作は実行不可
+- **明示的な確認**: 破壊的操作は Accept / Reject 必須
+- **影響範囲の提示**: 実行前に対象を表示
+- **権限制御**: 管理者 or 管理ロールのみ操作可能
+- **APIキー保護**: AES-256-GCM で暗号化保存
+- **監査ログ**: 破壊的操作を記録（短期保管）
 
 ## アーキテクチャ（詳細）
 ```
