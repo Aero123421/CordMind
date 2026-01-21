@@ -72,7 +72,25 @@ export const agentStepSchema = {
       type: "string"
     }
   },
-  required: ["type"]
+  required: ["type"],
+  oneOf: [
+    {
+      properties: { type: { const: "observe" }, action: { type: "string" } },
+      required: ["type", "action"]
+    },
+    {
+      properties: { type: { const: "act" }, actions: { type: "array", minItems: 1 } },
+      required: ["type", "actions"]
+    },
+    {
+      properties: { type: { const: "ask" }, question: { type: "string" } },
+      required: ["type", "question"]
+    },
+    {
+      properties: { type: { const: "finish" }, reply: { type: "string" } },
+      required: ["type", "reply"]
+    }
+  ]
 } as const;
 
 export const buildSystemPrompt = (lang: string | null | undefined): string => {
@@ -96,6 +114,9 @@ export const buildSystemPrompt = (lang: string | null | undefined): string => {
     "If the request is unclear, prefer observe or ask; do not reply with 'cannot interpret'.",
     "Always keep user-facing text concise and helpful. Never mix languages in user-facing text.",
     "When multiple targets match, ask a specific question listing the options.",
+    "If the user asks what you can do, reply with a short capability list and ask what they want next. Do not call tools.",
+    "If the user asks for current members/participants, call list_members (limit=10) and ask if they want more.",
+    "Use tool results (including data fields) to avoid asking for IDs when possible.",
     "Output example (ask): {\"type\":\"ask\",\"question\":\"対象チャンネル名を教えてください\"}",
     "Output example (observe): {\"type\":\"observe\",\"action\":\"list_channels\",\"params\":{\"type\":\"voice\",\"limit\":20}}",
     "Output example (act): {\"type\":\"act\",\"actions\":[{\"action\":\"rename_channel\",\"params\":{\"channel_name\":\"general\",\"new_name\":\"lobby\"},\"destructive\":false}]}",

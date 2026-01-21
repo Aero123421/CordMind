@@ -41,6 +41,54 @@ const confirmationRow = (id: string) =>
     new ButtonBuilder().setCustomId(`reject:${id}`).setLabel("Reject").setStyle(ButtonStyle.Danger)
   );
 
+const buildCapabilitySummary = (lang: string | null | undefined) => {
+  const list = [
+    t(lang, "Channel create / rename / delete", "チャンネルの作成 / リネーム / 削除"),
+    t(lang, "Thread list / delete", "スレッドの一覧 / 削除"),
+    t(lang, "Role create / delete / assign / remove", "ロールの作成 / 削除 / 付与 / 剥奪"),
+    t(lang, "Member list / search / details", "メンバーの一覧 / 検索 / 詳細"),
+    t(lang, "Kick / ban / timeout", "キック / BAN / タイムアウト"),
+    t(lang, "Permission checks", "権限の確認")
+  ];
+  return [
+    t(lang, "What I can do:", "できること:"),
+    ...list.map((item) => `• ${item}`),
+    t(lang, "Tell me what you want to do next.", "次にやりたいことを教えてください。")
+  ].join("\n");
+};
+
+const detectCapabilityIntent = (raw: string, lang: string | null | undefined) => {
+  const text = raw.trim().toLowerCase();
+  if (text.length === 0) return false;
+  if (lang === "ja") {
+    return ["何ができ", "できること", "使える", "機能", "対応でき", "何が可能"].some((key) => text.includes(key));
+  }
+  return ["what can you do", "capabilities", "features", "what is possible", "supported actions"].some((key) => text.includes(key));
+};
+
+const detectMemberListIntent = (raw: string, lang: string | null | undefined) => {
+  const text = raw.trim().toLowerCase();
+  if (text.length === 0) return false;
+  const excludes = lang === "ja"
+    ? ["検索", "探", "特定", "名前", "誰の", "どの"]
+    : ["search", "find", "lookup", "which", "whose"];
+  if (excludes.some((key) => text.includes(key))) return false;
+  if (lang === "ja") {
+    const matched = ["メンバー", "参加者", "参加している", "今いる", "在籍", "メンバー一覧", "メンバー教えて"].some((key) => text.includes(key));
+    if (!matched) return false;
+    const wantsAll = ["全員", "全部"].some((key) => text.includes(key));
+    const numberMatch = text.match(/(\d{1,3})/);
+    const limit = numberMatch ? Math.min(25, Math.max(1, Number(numberMatch[1]))) : wantsAll ? 25 : 10;
+    return { limit, wantsAll };
+  }
+  const matched = ["member list", "current members", "who is in", "participants", "members"].some((key) => text.includes(key));
+  if (!matched) return false;
+  const wantsAll = ["all", "everyone"].some((key) => text.includes(key));
+  const numberMatch = text.match(/(\d{1,3})/);
+  const limit = numberMatch ? Math.min(25, Math.max(1, Number(numberMatch[1]))) : wantsAll ? 25 : 10;
+  return { limit, wantsAll };
+};
+
 const getActionMeta = (action: PlannedAction) => toolRegistry[action.action]?.meta;
 
 const isDestructiveAction = (action: PlannedAction) => {
@@ -261,13 +309,20 @@ const notifyError = async (input: {
   });
 };
 
+const truncateSummary = (summary: string, maxChars: number) => {
+  if (summary.length <= maxChars) return summary;
+  return summary.slice(0, Math.max(0, maxChars - 3)) + "...";
+};
+
 const buildMessages = async (message: Message, lang: string | null | undefined, initialSummary?: string | null) => {
   const thread = message.channel as ThreadChannel;
   const fetched = await thread.messages.fetch({ limit: 60 });
   const sorted = Array.from(fetched.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
-  const systemContent = initialSummary
-    ? `${buildSystemPrompt(lang)}\n${t(lang, "Initial request", "初期依頼")}: ${initialSummary}`
+  const normalizedSummary = initialSummary ? initialSummary.trim() : "";
+  const summaryText = normalizedSummary.length > 0 ? truncateSummary(normalizedSummary, 800) : "";
+  const systemContent = normalizedSummary.length > 0
+    ? `${buildSystemPrompt(lang)}\n${t(lang, "Memory summary", "メモリ要約")}: ${summaryText}`
     : buildSystemPrompt(lang);
   const system = { role: "system" as const, content: systemContent };
   const budget = Math.max(2000, MAX_CONTEXT_CHARS - systemContent.length);
@@ -508,6 +563,49 @@ export const handleThreadMessage = async (message: Message) => {
   }
 
   const diagnosticsTopic = detectDiagnosticsTopic(message.content, settings.language);
+  const capabilityIntent = detectCapabilityIntent(message.content, settings.language);
+  const memberListIntent = detectMemberListIntent(message.content, settings.language);
+
+  if (capabilityIntent) {
+    await message.reply(buildCapabilitySummary(settings.language));
+    return;
+  }
+
+  if (memberListIntent) {
+    if (!checkRateLimit(guildId, settings.rate_limit_per_min)) {
+      await message.reply(t(settings.language, "Rate limit exceeded. Try again later.", "レート制限を超えました。少し待ってから再試行してください。"));
+      await notifyError({
+        guild: message.guild,
+        logChannelId: settings.log_channel_id,
+        actorTag: message.author.tag,
+        action: "rate_limit",
+        message: "Rate limit exceeded."
+      });
+      return;
+    }
+
+    const entry = toolRegistry.list_members;
+    if (!entry) {
+      await message.reply(t(settings.language, "Member list tool is not available.", "メンバー一覧ツールが利用できません。"));
+      return;
+    }
+    try {
+      const { limit, wantsAll } = memberListIntent;
+      const result = await entry.handler(
+        { client: message.client, guild: message.guild, actor: message.author, lang: settings.language },
+        { limit }
+      );
+      const limitNote = wantsAll
+        ? t(settings.language, "Note: showing up to 25 members.", "※ 最大25件まで表示します。")
+        : "";
+      const moreHint = t(settings.language, "If you want more, ask for a larger number (e.g., 25).", "もっと見たい場合は件数を指定してください（例: 25）。");
+      await message.reply([result.message, limitNote, moreHint].filter((line) => line.length > 0).join("\n"));
+    } catch (error) {
+      logger.error({ error }, "Member list failed");
+      await message.reply(t(settings.language, "Failed to fetch members.", "メンバー一覧の取得に失敗しました。"));
+    }
+    return;
+  }
 
   const apiKey = await getDecryptedApiKey(guildId, settings.provider as ProviderName);
   if (!apiKey) {
@@ -577,8 +675,8 @@ export const handleThreadMessage = async (message: Message) => {
   const agentMessages = await buildMessages(message, settings.language, threadState?.summary ?? null);
   const planFallbackReply = t(
     settings.language,
-    "I couldn't complete that. Please clarify what you want to do.",
-    "うまく処理できませんでした。やりたいことをもう少し具体的に教えてください。"
+    "I couldn't complete that. Please clarify what you want to do (e.g., list members, create a channel).",
+    "うまく処理できませんでした。やりたいことをもう少し具体的に教えてください（例: メンバー一覧 / チャンネル作成）。"
   );
 
   if (diagnosticsTopic) {
