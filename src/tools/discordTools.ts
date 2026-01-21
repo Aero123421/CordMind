@@ -189,6 +189,7 @@ export const listChannels: ToolHandler = async (context, params) => {
     .map((channel) => {
       const typeLabel = channelTypeLabel(channel!.type);
       const parentId = "parentId" in channel! && typeof channel!.parentId === "string" ? channel!.parentId : null;
+      const parentName = "parent" in channel! && channel!.parent && typeof channel!.parent.name === "string" ? channel!.parent.name : null;
       const userLimit = "userLimit" in channel! && typeof (channel as unknown as { userLimit?: unknown }).userLimit === "number"
         ? (channel as unknown as { userLimit: number }).userLimit
         : null;
@@ -197,6 +198,7 @@ export const listChannels: ToolHandler = async (context, params) => {
         name: channel?.name ?? "",
         type: typeLabel,
         parentId,
+        parentName,
         userLimit
       };
     })
@@ -206,7 +208,11 @@ export const listChannels: ToolHandler = async (context, params) => {
     .map((channel) => {
       const extra = [
         channel.type ? `type=${channel.type}` : null,
-        channel.parentId ? `parent_id=${channel.parentId}` : null,
+        channel.parentId
+          ? (context.lang === "ja"
+            ? `親カテゴリ=${channel.parentName ? `#${channel.parentName} (${channel.parentId})` : channel.parentId}`
+            : `parent=${channel.parentName ?? channel.parentId}`)
+          : null,
         channel.userLimit !== null && channel.userLimit !== undefined ? `user_limit=${channel.userLimit}` : null
       ].filter(Boolean).join(" ");
       return `#${channel.name} (${channel.id}) ${extra}`.trim();

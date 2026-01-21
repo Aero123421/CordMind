@@ -145,6 +145,18 @@ const buildDestructiveConfirmationMessage = (
   return lines.join("\n\n");
 };
 
+const sanitizeConfirmationPreface = (preface: string, lang: string | null | undefined) => {
+  const trimmed = preface.trim();
+  if (!trimmed) return "";
+  const lower = trimmed.toLowerCase();
+  const duplicateHints = lang === "ja"
+    ? ["破壊的", "操作内容", "影響範囲", "accept", "reject", "承認", "却下", "キャンセル"]
+    : ["destructive", "planned actions", "impact", "accept", "reject", "approve", "cancel"];
+  if (duplicateHints.some((hint) => lower.includes(hint))) return "";
+  if (trimmed.length > 200) return trimmed.slice(0, 200);
+  return trimmed;
+};
+
 const normalizeActionsFromStep = (step: AgentStep): PlannedAction[] => {
   if (step.type !== "act") return [];
   const list = Array.isArray(step.actions) ? step.actions : [];
@@ -432,6 +444,75 @@ const buildMemoryAppend = (
   });
 
   return lines.join("\n");
+};
+
+const buildObservationMemoryAppend = (
+  lang: string | null | undefined,
+  action: PlannedAction,
+  result: { ok: boolean; data?: unknown }
+) => {
+  if (!result.ok || result.data === undefined) return null;
+  const params = action.params ?? {};
+
+  switch (action.action) {
+    case "list_channels": {
+      const channels = (result.data as { channels?: Array<{ id?: string; name?: string; type?: string; parentId?: string | null; parentName?: string | null }> }).channels;
+      if (!Array.isArray(channels) || channels.length === 0) return null;
+      const samples = channels.slice(0, 6).map((channel) => {
+        const name = channel.name ?? "?";
+        const id = channel.id ?? "?";
+        const parent = channel.parentName ?? channel.parentId ?? null;
+        const parentText = parent ? (lang === "ja" ? `親=${parent}` : `parent=${parent}`) : null;
+        return `${name}(${id})${parentText ? ` ${parentText}` : ""}`;
+      });
+      const type = typeof params.type === "string" ? params.type : "any";
+      return t(
+        lang,
+        `Observed channels (type=${type}): ${samples.join(", ")}`,
+        `観測したチャンネル(type=${type}): ${samples.join(", ")}`
+      );
+    }
+    case "list_threads": {
+      const threads = (result.data as { threads?: Array<{ id?: string; name?: string }> }).threads;
+      if (!Array.isArray(threads) || threads.length === 0) return null;
+      const samples = threads.slice(0, 6).map((thread) => `${thread.name ?? "?"}(${thread.id ?? "?"})`);
+      return t(lang, `Observed threads: ${samples.join(", ")}`, `観測したスレッド: ${samples.join(", ")}`);
+    }
+    case "list_roles": {
+      const roles = (result.data as { roles?: Array<{ id?: string; name?: string }> }).roles;
+      if (!Array.isArray(roles) || roles.length === 0) return null;
+      const samples = roles.slice(0, 6).map((role) => `${role.name ?? "?"}(${role.id ?? "?"})`);
+      return t(lang, `Observed roles: ${samples.join(", ")}`, `観測したロール: ${samples.join(", ")}`);
+    }
+    case "list_members": {
+      const members = (result.data as { members?: Array<{ id?: string; tag?: string }> }).members;
+      if (!Array.isArray(members) || members.length === 0) return null;
+      const samples = members.slice(0, 6).map((member) => `${member.tag ?? "?"}(${member.id ?? "?"})`);
+      return t(lang, `Observed members: ${samples.join(", ")}`, `観測したメンバー: ${samples.join(", ")}`);
+    }
+    case "get_channel_details": {
+      const channel = result.data as { id?: string; name?: string; parentId?: string | null; parentName?: string | null };
+      if (!channel || !channel.id) return null;
+      const parent = channel.parentName ?? channel.parentId ?? null;
+      const parentText = parent ? (lang === "ja" ? `親=${parent}` : `parent=${parent}`) : null;
+      return t(
+        lang,
+        `Channel details: ${channel.name ?? "?"}(${channel.id})${parentText ? ` ${parentText}` : ""}`,
+        `チャンネル詳細: ${channel.name ?? "?"}(${channel.id})${parentText ? ` ${parentText}` : ""}`
+      );
+    }
+    case "get_member_details": {
+      const member = result.data as { id?: string; tag?: string };
+      if (!member || !member.id) return null;
+      return t(
+        lang,
+        `Member details: ${member.tag ?? "?"}(${member.id})`,
+        `メンバー詳細: ${member.tag ?? "?"}(${member.id})`
+      );
+    }
+    default:
+      return null;
+  }
 };
 
 const truncateForLLM = (input: string, maxChars: number) => {
@@ -814,6 +895,18 @@ export const handleThreadMessage = async (message: Message) => {
         result = { ok: false, message: "Tool execution failed." };
       }
 
+      const observationMemory = buildObservationMemoryAppend(settings.language, observationAction, result);
+      if (observationMemory) {
+        appendThreadSummary({
+          threadId: message.channel.id,
+          guildId,
+          ownerUserId: threadState?.owner_user_id ?? message.author.id,
+          append: observationMemory
+        }).catch(() => {
+          // ignore
+        });
+      }
+
       agentMessages.push({ role: "assistant" as const, content: buildToolResultMessage(observationAction, result) });
       continue;
     }
@@ -952,6 +1045,18 @@ export const handleThreadMessage = async (message: Message) => {
         result = { ok: false, message: "Tool execution failed." };
       }
 
+      const observationMemory = buildObservationMemoryAppend(settings.language, observationAction, result);
+      if (observationMemory) {
+        appendThreadSummary({
+          threadId: message.channel.id,
+          guildId,
+          ownerUserId: threadState?.owner_user_id ?? message.author.id,
+          append: observationMemory
+        }).catch(() => {
+          // ignore
+        });
+      }
+
       agentMessages.push({ role: "assistant" as const, content: buildToolResultMessage(observationAction, result) });
       continue;
     }
@@ -1028,7 +1133,8 @@ export const handleThreadMessage = async (message: Message) => {
         });
       }
 
-      const preface = agentStep.type === "act" && agentStep.reply ? agentStep.reply : "";
+      const prefaceRaw = agentStep.type === "act" && agentStep.reply ? agentStep.reply : "";
+      const preface = sanitizeConfirmationPreface(prefaceRaw, settings.language);
       await message.reply({
         content: buildDestructiveConfirmationMessage(settings.language, preface, actions, impact),
         components: [confirmationRow(audit.id)]

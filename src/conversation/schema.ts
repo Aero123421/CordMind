@@ -141,6 +141,7 @@ export const buildSystemPrompt = (lang: string | null | undefined): string => {
     "- delete_threads params: thread_ids (array) OR prefix/name_contains/owner_id, optional older_than_minutes, limit. This MUST be destructive.",
     "- If a user asks to rename/delete without giving IDs, first call list_channels to locate targets. Ask a clarifying question only if multiple candidates exist.",
     "- If a user asks to delete many threads, first call list_threads (e.g., prefix=\"discord-ai |\"), then propose delete_threads. Ask scope/timeframe if unclear.",
+    "- If the user says \"カテゴリごと消して/削除\" after discussing channels, infer parent categories from recent channel observations. If unsure, list categories and ask which to delete.",
     "- Voice channels only support a maximum user limit. If a user gives a range for a single channel, set user_limit to the max and mention that minimum isn't supported.",
     "- For multi-step requests, include an actions array of tool calls (and set top-level action/params to the first action).",
     `- Keep total actions <= ${MAX_ACTIONS_PER_REQUEST}; if more are needed, ask the user to split the request.`,
