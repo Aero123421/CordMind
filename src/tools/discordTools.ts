@@ -299,12 +299,14 @@ export const listThreads: ToolHandler = async (context, params) => {
     .map((thread) => {
       const parent = thread.parentId ? `<#${thread.parentId}>` : "-";
       const owner = thread.ownerId ? `<@${thread.ownerId}>` : "-";
-      const flags = [
-        thread.archived ? "archived" : null,
-        thread.locked ? "locked" : null
-      ].filter(Boolean).join(",");
-      const flagText = flags.length > 0 ? ` flags=${flags}` : "";
-      return `🧵 ${thread.name} (${thread.id}) parent=${parent} owner=${owner}${flagText}`;
+      const flagsEn = [thread.archived ? "archived" : null, thread.locked ? "locked" : null].filter(Boolean).join(",");
+      const flagsJa = [thread.archived ? "アーカイブ" : null, thread.locked ? "ロック" : null].filter(Boolean).join("・");
+      const flagText = context.lang === "ja"
+        ? (flagsJa.length > 0 ? ` 状態=${flagsJa}` : "")
+        : (flagsEn.length > 0 ? ` flags=${flagsEn}` : "");
+      return context.lang === "ja"
+        ? `🧵 ${thread.name} (${thread.id}) 親=${parent} 作成者=${owner}${flagText}`
+        : `🧵 ${thread.name} (${thread.id}) parent=${parent} owner=${owner}${flagText}`;
     })
     .join("\n");
 
@@ -407,9 +409,21 @@ export const deleteThreads: ToolHandler = async (context, params) => {
 
   const deleted = results.filter((item) => item.ok);
   const failed = results.filter((item) => !item.ok);
+  const okLabel = t(context.lang, "OK", "成功");
+  const failLabel = t(context.lang, "Failed", "失敗");
+  const rateLimitLabel = t(context.lang, "rate_limit", "レート制限");
+  const deleteFailedLabel = t(context.lang, "delete_failed", "削除失敗");
   const preview = results
     .slice(0, 8)
-    .map((item) => `• ${item.ok ? "OK" : "Failed"}: ${item.name} (${item.id})${item.message ? ` (${item.message})` : ""}`)
+    .map((item) => {
+      const reasonText = item.message === "rate_limit"
+        ? rateLimitLabel
+        : item.message === "delete_failed"
+          ? deleteFailedLabel
+          : item.message ?? "";
+      const suffix = reasonText.length > 0 ? ` (${reasonText})` : "";
+      return `• ${item.ok ? okLabel : failLabel}: ${item.name} (${item.id})${suffix}`;
+    })
     .join("\n");
   const more = results.length > 8 ? ` (+${results.length - 8})` : "";
 
