@@ -97,7 +97,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       } catch {
         // ignore
       }
-      await interaction.reply({ ephemeral: true, content: t(lang, "An error occurred.", "エラーが発生しました。") });
+      try {
+        const payload = { ephemeral: true, content: t(lang, "An error occurred.", "エラーが発生しました。") };
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp(payload);
+        } else {
+          await interaction.reply(payload);
+        }
+      } catch (replyError) {
+        logger.warn({ replyError }, "Failed to send interaction error response");
+      }
     }
   }
 });

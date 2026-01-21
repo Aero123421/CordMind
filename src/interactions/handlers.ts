@@ -301,10 +301,56 @@ const showApiModal = async (interaction: import("discord.js").ButtonInteraction,
   await interaction.showModal(modal);
 };
 
+const updateInteraction = async (
+  interaction:
+    | import("discord.js").StringSelectMenuInteraction
+    | import("discord.js").ChannelSelectMenuInteraction
+    | import("discord.js").RoleSelectMenuInteraction
+    | import("discord.js").ButtonInteraction,
+  options: Parameters<typeof interaction.update>[0]
+) => {
+  if (interaction.deferred || interaction.replied) {
+    return interaction.editReply(options);
+  }
+  return interaction.update(options);
+};
+
+const shouldDeferComponent = (interaction: import("discord.js").Interaction) => {
+  if (interaction.isStringSelectMenu()) {
+    const [scope, action] = interaction.customId.split(":");
+    const value = interaction.values[0];
+    if ((scope === "setup" || scope === "setting") && action === "model" && value === "custom") return false;
+    if (scope === "setting" && action === "menu" && value === "rate_limit") return false;
+    return true;
+  }
+  if (interaction.isButton()) {
+    const [, action, subAction] = interaction.customId.split(":");
+    if (action === "apikey" && subAction === "set") return false;
+    return true;
+  }
+  if (interaction.isChannelSelectMenu() || interaction.isRoleSelectMenu()) {
+    return true;
+  }
+  return false;
+};
+
 export const handleComponent = async (interaction: import("discord.js").Interaction) => {
   if (!interaction.isRepliable() || !interaction.guildId) return;
   const settings = await getGuildSettings(interaction.guildId);
   const lang = settings.language;
+
+  if (
+    shouldDeferComponent(interaction) &&
+    !interaction.deferred &&
+    !interaction.replied &&
+    (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isChannelSelectMenu() || interaction.isRoleSelectMenu())
+  ) {
+    try {
+      await interaction.deferUpdate();
+    } catch {
+      // ignore
+    }
+  }
 
   if (interaction.isStringSelectMenu()) {
     const [scope, action] = interaction.customId.split(":");
@@ -313,7 +359,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
     if (scope === "setup" && action === "language") {
       await updateGuildSettings(interaction.guildId, { language: value });
       const view = buildSetupProviderView(value, settings.provider);
-      await interaction.update(view);
+      await updateInteraction(interaction, view);
       return;
     }
 
@@ -322,7 +368,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       const shouldClearModel = provider !== settings.provider;
       await updateGuildSettings(interaction.guildId, shouldClearModel ? { provider, model: null } : { provider });
       const view = await buildSetupModelView(interaction.guildId, lang, provider, shouldClearModel ? null : settings.model);
-      await interaction.update(view);
+      await updateInteraction(interaction, view);
       return;
     }
 
@@ -333,7 +379,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       }
       await updateGuildSettings(interaction.guildId, { model: value });
       const view = await buildSetupModelView(interaction.guildId, lang, settings.provider as ProviderName, value);
-      await interaction.update(view);
+      await updateInteraction(interaction, view);
       return;
     }
 
@@ -341,37 +387,37 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       switch (value) {
         case "wizard": {
           const view = buildSetupLanguageView(lang, settings.language);
-          await interaction.update(view);
+          await updateInteraction(interaction, view);
           return;
         }
         case "language":
-          await interaction.update({
+          await updateInteraction(interaction, {
             content: t(lang, "Choose language", "言語を選択してください"),
             components: [buildLanguageRow("setting", lang), buildBackRow(lang)]
           });
           return;
         case "provider":
-          await interaction.update({
+          await updateInteraction(interaction, {
             content: t(lang, "Choose provider", "プロバイダーを選択してください"),
             components: [buildProviderRow("setting", settings.provider), buildBackRow(lang)]
           });
           return;
         case "api_key":
           const apiStatus = await buildApiKeyStatusAll(interaction.guildId, lang);
-          await interaction.update({
+          await updateInteraction(interaction, {
             content: `${t(lang, "Manage API Key", "APIキーを管理")}\n${t(lang, "Current provider", "現在のプロバイダー")}: ${settings.provider}\n${apiStatus}`,
             components: [buildApiKeyRow("setting", lang), buildBackRow(lang)]
           });
           return;
         case "model":
           const modelRow = await buildModelRow(interaction.guildId, "setting", settings.provider as ProviderName, settings.model, lang);
-          await interaction.update({
+          await updateInteraction(interaction, {
             content: `${t(lang, "Choose model", "モデルを選択してください")}\n${t(lang, "Current provider", "現在のプロバイダー")}: ${settings.provider}`,
             components: [modelRow, buildBackRow(lang)]
           });
           return;
         case "log_channel":
-          await interaction.update({
+          await updateInteraction(interaction, {
             content: t(lang, "Select log channel", "ログチャンネルを選択"),
             components: [
               new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
@@ -385,7 +431,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
           });
           return;
         case "manager_role":
-          await interaction.update({
+          await updateInteraction(interaction, {
             content: t(lang, "Select manager role", "管理ロールを選択"),
             components: [
               new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
@@ -398,7 +444,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
           });
           return;
         case "thread_archive":
-          await interaction.update({
+          await updateInteraction(interaction, {
             content: t(lang, "Select thread archive minutes", "スレッドのアーカイブ時間を選択"),
             components: [buildThreadArchiveRow(lang, settings.thread_archive_minutes), buildBackRow(lang)]
           });
@@ -408,7 +454,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
           return;
         case "show": {
           const summary = await buildSummary(interaction.guildId, lang);
-          await interaction.update({
+          await updateInteraction(interaction, {
             content: summary,
             components: [buildSettingsMenu(lang)]
           });
@@ -420,7 +466,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
     if (scope === "setting" && action === "language") {
       await updateGuildSettings(interaction.guildId, { language: value });
       const summary = await buildSummary(interaction.guildId, value);
-      await interaction.update({
+      await updateInteraction(interaction, {
         content: summary,
         components: [buildSettingsMenu(value)]
       });
@@ -432,7 +478,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       const shouldClearModel = provider !== settings.provider;
       await updateGuildSettings(interaction.guildId, shouldClearModel ? { provider, model: null } : { provider });
       const summary = await buildSummary(interaction.guildId, lang);
-      await interaction.update({
+      await updateInteraction(interaction, {
         content: summary,
         components: [buildSettingsMenu(lang)]
       });
@@ -446,7 +492,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       }
       await updateGuildSettings(interaction.guildId, { model: value });
       const summary = await buildSummary(interaction.guildId, lang);
-      await interaction.update({
+      await updateInteraction(interaction, {
         content: summary,
         components: [buildSettingsMenu(lang)]
       });
@@ -457,7 +503,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       const minutes = Number(value);
       await updateGuildSettings(interaction.guildId, { thread_archive_minutes: minutes });
       const summary = await buildSummary(interaction.guildId, lang);
-      await interaction.update({
+      await updateInteraction(interaction, {
         content: summary,
         components: [buildSettingsMenu(lang)]
       });
@@ -471,14 +517,14 @@ export const handleComponent = async (interaction: import("discord.js").Interact
     if (scope === "setup" && action === "language" && subAction === "next") {
       const langNow = settings.language;
       const view = buildSetupProviderView(langNow, settings.provider);
-      await interaction.update(view);
+      await updateInteraction(interaction, view);
       return;
     }
 
     if (scope === "setup" && action === "provider" && subAction === "next") {
       const provider = settings.provider as ProviderName;
       const view = await buildSetupModelView(interaction.guildId, lang, provider, settings.model);
-      await interaction.update(view);
+      await updateInteraction(interaction, view);
       return;
     }
 
@@ -486,11 +532,11 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       if (!settings.model || settings.model.trim().length === 0) {
         const warning = t(lang, "Model not set yet. Please choose one.", "モデルは未設定です。選択してください。");
         const view = await buildSetupModelView(interaction.guildId, lang, settings.provider as ProviderName, settings.model);
-        await interaction.update({ content: `${warning}\n${view.content}`, components: view.components });
+        await updateInteraction(interaction, { content: `${warning}\n${view.content}`, components: view.components });
         return;
       }
       const modelLine = t(lang, `Model set: ${formatModelLabel(settings.model, settings.provider, lang)}`, `モデル設定済み: ${formatModelLabel(settings.model, settings.provider, lang)}`);
-      await interaction.update({
+      await updateInteraction(interaction, {
         content: `${t(lang, "Setup complete. Use /discordaimanage setting to adjust anytime.", "セットアップ完了。いつでも /discordaimanage setting から変更できます。")}\n${modelLine}`,
         components: []
       });
@@ -499,7 +545,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
     if (interaction.customId === "setting:back") {
       const summary = await buildSummary(interaction.guildId, lang);
-      await interaction.update({
+      await updateInteraction(interaction, {
         content: summary,
         components: [buildSettingsMenu(lang)]
       });
@@ -540,10 +586,10 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
       if (scope === "setup") {
         const view = await buildSetupModelView(interaction.guildId, lang, settings.provider as ProviderName, settings.model);
-        await interaction.update(view);
+        await updateInteraction(interaction, view);
       } else {
         const summary = await buildSummary(interaction.guildId, lang);
-        await interaction.update({
+        await updateInteraction(interaction, {
           content: summary,
           components: [buildSettingsMenu(lang)]
         });
@@ -557,7 +603,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       const channelId = interaction.values[0];
       await updateGuildSettings(interaction.guildId, { log_channel_id: channelId ?? null });
       const summary = await buildSummary(interaction.guildId, lang);
-      await interaction.update({
+      await updateInteraction(interaction, {
         content: summary,
         components: [buildSettingsMenu(lang)]
       });
@@ -570,7 +616,7 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       const roleId = interaction.values[0];
       await updateGuildSettings(interaction.guildId, { manager_role_id: roleId ?? null });
       const summary = await buildSummary(interaction.guildId, lang);
-      await interaction.update({
+      await updateInteraction(interaction, {
         content: summary,
         components: [buildSettingsMenu(lang)]
       });
@@ -583,6 +629,13 @@ export const handleModal = async (interaction: import("discord.js").ModalSubmitI
   if (!interaction.guildId) return;
   const settings = await getGuildSettings(interaction.guildId);
   const lang = settings.language;
+  if (!interaction.deferred && !interaction.replied) {
+    try {
+      await interaction.deferReply({ ephemeral: true });
+    } catch {
+      // ignore
+    }
+  }
 
   if (interaction.customId === API_MODAL_ID) {
     const apiKey = interaction.fields.getTextInputValue(API_INPUT_ID).trim();
@@ -616,8 +669,7 @@ export const handleModal = async (interaction: import("discord.js").ModalSubmitI
     const summary = await buildSummary(interaction.guildId, lang);
     const modelRow = await buildModelRow(interaction.guildId, "setting", provider, settings.model, lang);
     const apiStatus = await buildApiKeyStatusAll(interaction.guildId, lang);
-    await interaction.reply({
-      ephemeral: true,
+    await interaction.editReply({
       content: `${t(lang, `API key saved for ${provider}.`, `${provider} のAPIキーを保存しました。`)}\n${apiStatus}`,
       components: [modelRow]
     });
@@ -633,8 +685,7 @@ export const handleModal = async (interaction: import("discord.js").ModalSubmitI
     const model = interaction.fields.getTextInputValue(MODEL_INPUT_ID).trim();
     await updateGuildSettings(interaction.guildId, { model });
     const summary = await buildSummary(interaction.guildId, lang);
-    await interaction.reply({
-      ephemeral: true,
+    await interaction.editReply({
       content: t(lang, `Model set to ${model}.`, `モデルを ${model} に設定しました。`),
       components: [buildSettingsMenu(lang)]
     });
@@ -645,16 +696,14 @@ export const handleModal = async (interaction: import("discord.js").ModalSubmitI
     const raw = interaction.fields.getTextInputValue(RATE_INPUT_ID).trim();
     const value = Number(raw);
     if (!Number.isFinite(value) || value <= 0) {
-      await interaction.reply({
-        ephemeral: true,
+      await interaction.editReply({
         content: t(lang, "Please enter a valid number.", "有効な数値を入力してください。")
       });
       return;
     }
     await updateGuildSettings(interaction.guildId, { rate_limit_per_min: value });
     const summary = await buildSummary(interaction.guildId, lang);
-    await interaction.reply({
-      ephemeral: true,
+    await interaction.editReply({
       content: summary,
       components: [buildSettingsMenu(lang)]
     });

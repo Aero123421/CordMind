@@ -1055,14 +1055,21 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
   const lang = settings.language;
   const [action, id] = interaction.customId.split(":");
   if (!id) return;
+  if (!interaction.deferred && !interaction.replied) {
+    try {
+      await interaction.deferUpdate();
+    } catch (error) {
+      logger.warn({ error }, "Failed to defer confirmation interaction");
+    }
+  }
   const record = await db.auditEvent.findUnique({ where: { id } });
   if (!record) {
-    await interaction.reply({ ephemeral: true, content: t(lang, "Audit record not found.", "監査レコードが見つかりませんでした。") });
+    await interaction.followUp({ ephemeral: true, content: t(lang, "Audit record not found.", "監査レコードが見つかりませんでした。") });
     return;
   }
 
   if (record.confirmation_status !== "pending") {
-    await interaction.reply({ ephemeral: true, content: t(lang, "This request is already resolved.", "このリクエストはすでに処理済みです。") });
+    await interaction.followUp({ ephemeral: true, content: t(lang, "This request is already resolved.", "このリクエストはすでに処理済みです。") });
     return;
   }
 
@@ -1090,13 +1097,13 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
   });
 
   if (normalizedActions.length === 0) {
-    await interaction.reply({ ephemeral: true, content: t(lang, "No actions to execute.", "実行する操作がありません。") });
+    await interaction.followUp({ ephemeral: true, content: t(lang, "No actions to execute.", "実行する操作がありません。") });
     return;
   }
 
   const isOwner = payload.request.thread_id === interaction.channelId && record.actor_user_id === interaction.user.id;
   if (!isOwner) {
-    await interaction.reply({ ephemeral: true, content: t(lang, "Not authorized to confirm this action.", "この操作を承認できません（依頼者のみ承認可能です）。") });
+    await interaction.followUp({ ephemeral: true, content: t(lang, "Not authorized to confirm this action.", "この操作を承認できません（依頼者のみ承認可能です）。") });
     return;
   }
 
@@ -1111,19 +1118,19 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
         message: "Rejected by user"
       });
     }
-    await interaction.reply({ content: t(lang, "Rejected.", "却下しました。") });
+    await interaction.followUp({ content: t(lang, "Rejected.", "却下しました。") });
     return;
   }
 
-    if (action !== "confirm") {
-      await interaction.reply({ ephemeral: true, content: t(lang, "Unknown action.", "不明な操作です。") });
-      return;
-    }
+  if (action !== "confirm") {
+    await interaction.followUp({ ephemeral: true, content: t(lang, "Unknown action.", "不明な操作です。") });
+    return;
+  }
 
-    const missingPerms = await resolveMissingBotPerms(interaction.guild, normalizedActions);
-    if (missingPerms.length > 0) {
-      const missingText = formatMissingPerms(missingPerms, lang);
-      await updateAuditEvent(id, { confirmation_status: "approved", status: "failure", error_message: missingText });
+  const missingPerms = await resolveMissingBotPerms(interaction.guild, normalizedActions);
+  if (missingPerms.length > 0) {
+    const missingText = formatMissingPerms(missingPerms, lang);
+    await updateAuditEvent(id, { confirmation_status: "approved", status: "failure", error_message: missingText });
       if (settings.log_channel_id) {
         await sendAuditLog(interaction.guild, settings.log_channel_id, {
           action: record.action,
@@ -1133,9 +1140,9 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
           message: missingText
         });
       }
-      await interaction.reply({ ephemeral: true, content: missingText });
-      return;
-    }
+    await interaction.followUp({ ephemeral: true, content: missingText });
+    return;
+  }
 
     const results: Array<{ action: string; ok: boolean; message: string; discordIds?: string[] }> = [];
 
@@ -1216,5 +1223,5 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
     });
   }
 
-  await interaction.reply({ content: okAll ? t(lang, `Done:\n${summary}`, `完了:\n${summary}`) : t(lang, `Failed:\n${summary}`, `失敗:\n${summary}`) });
+  await interaction.followUp({ content: okAll ? t(lang, `Done:\n${summary}`, `完了:\n${summary}`) : t(lang, `Failed:\n${summary}`, `失敗:\n${summary}`) });
 };
