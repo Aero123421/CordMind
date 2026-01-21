@@ -11,7 +11,7 @@ export const DEFAULT_BASE_URLS: Record<ProviderName, string> = {
 
 export const DEFAULT_THREAD_ARCHIVE_MINUTES = 4320;
 export const DEFAULT_RATE_LIMIT_PER_MIN = 10;
-export const DESTRUCTIVE_LIMIT_PER_MIN = 3;
+export const DESTRUCTIVE_LIMIT_PER_MIN = 50;
 export const DEFAULT_AUDIT_RETENTION_DAYS = 7;
 export const MAX_ACTIONS_PER_REQUEST = 12;
 
