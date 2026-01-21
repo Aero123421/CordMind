@@ -113,6 +113,7 @@ export const buildSystemPrompt = (lang: string | null | undefined): string => {
     "- get_role_details params: role_id or role_name (exact). role_id can be a role mention.",
     "- assign_role/remove_role params: user_id or user_mention or query, and role_id/role_name. If ambiguous, ask which user/role to use.",
     "- find_members params: query (string), limit (number). Use this to find user IDs.",
+    "- list_members params: limit (number). Use this when the user asks for current members.",
     "- get_member_details params: user_id or user_mention or query.",
     "- kick_member/ban_member/timeout_member/untimeout_member params: user_id or user_mention or query, optional reason. These MUST be destructive.",
     "- delete_thread params: thread_id/thread_mention or thread_name, optional reason. This MUST be destructive.",

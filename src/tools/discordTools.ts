@@ -729,6 +729,40 @@ export const diagnoseGuild: ToolHandler = async (context, params) => {
   return ok(report);
 };
 
+export const listMembers: ToolHandler = async (context, params) => {
+  const limit = Math.min(25, Math.max(1, parseNumber(params.limit, 10)));
+  let members: GuildMember[] = [];
+
+  try {
+    const fetched = await context.guild.members.fetch({ limit });
+    members = Array.from(fetched.values()).slice(0, limit);
+  } catch {
+    const cached = Array.from(context.guild.members.cache.values()).slice(0, limit);
+    members = cached;
+  }
+
+  if (members.length === 0) {
+    return ok(t(context.lang, "No members found.", "メンバーが見つかりませんでした。"), [], { members: [] });
+  }
+
+  const data = members.map((member) => ({
+    id: member.id,
+    tag: member.user.tag,
+    nickname: member.nickname ?? null
+  }));
+  const list = data
+    .map((member) => `${member.tag} (${member.id})${member.nickname ? ` nickname=${member.nickname}` : ""}`)
+    .join("\n");
+  const total = context.guild.memberCount ?? members.length;
+  const header = t(
+    context.lang,
+    `Members (showing ${members.length}/${total}):`,
+    `メンバー一覧 (${members.length}/${total}表示):`
+  );
+
+  return ok(`${header}\n${list}`, data.map((member) => member.id), { members: data, total });
+};
+
 export const findMembers: ToolHandler = async (context, params) => {
   const query =
     (typeof params.query === "string" ? params.query : null) ??

@@ -91,6 +91,7 @@ export const ALLOWED_ACTIONS = new Set([
   "get_guild_permissions",
   "get_bot_permissions",
   "find_members",
+  "list_members",
   "get_member_details",
   "kick_member",
   "ban_member",
