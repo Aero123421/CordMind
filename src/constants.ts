@@ -76,6 +76,7 @@ export const ALLOWED_ACTIONS = new Set([
   "get_channel_details",
   "create_channel",
   "rename_channel",
+  "move_channel",
   "delete_channel",
   "create_thread",
   "delete_thread",

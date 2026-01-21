@@ -43,7 +43,7 @@ const confirmationRow = (id: string) =>
 
 const buildCapabilitySummary = (lang: string | null | undefined) => {
   const list = [
-    t(lang, "Channel create / rename / delete", "チャンネルの作成 / リネーム / 削除"),
+    t(lang, "Channel create / move / rename / delete", "チャンネルの作成 / 移動 / リネーム / 削除"),
     t(lang, "Thread list / delete", "スレッドの一覧 / 削除"),
     t(lang, "Role create / delete / assign / remove", "ロールの作成 / 削除 / 付与 / 剥奪"),
     t(lang, "Member list / search / details", "メンバーの一覧 / 検索 / 詳細"),
@@ -189,6 +189,14 @@ const channelRefFromParams = (params: Record<string, unknown>) => {
   return mention.channel(channelId) ?? (channelName ? `#${channelName}` : "(channel)");
 };
 
+const parentRefFromParams = (params: Record<string, unknown>, lang: string | null | undefined) => {
+  const parentId = typeof params.parent_id === "string" ? params.parent_id : typeof params.category_id === "string" ? params.category_id : undefined;
+  const parentName = typeof params.parent_name === "string" ? params.parent_name : typeof params.category_name === "string" ? params.category_name : undefined;
+  if (parentId) return mention.channel(parentId);
+  if (parentName) return `#${parentName}`;
+  return t(lang, "(no category)", "(カテゴリなし)");
+};
+
 const threadRefFromParams = (params: Record<string, unknown>) => {
   const threadId = extractMentionId(params.thread_id, /<#(\d+)>/) ??
     extractMentionId(params.thread_mention, /<#(\d+)>/) ??
@@ -227,6 +235,19 @@ const summarizeActionForDisplay = (action: PlannedAction, lang: string | null | 
     case "rename_channel": {
       const newName = typeof params.new_name === "string" ? params.new_name : "(missing new_name)";
       return t(lang, `Rename channel ${channelRefFromParams(params)} → ${newName}`, `チャンネル名変更 ${channelRefFromParams(params)} → ${newName}`);
+    }
+    case "move_channel": {
+      const parentRef = parentRefFromParams(params, lang);
+      const lock = typeof params.lock_permissions === "boolean"
+        ? ` lock_permissions=${params.lock_permissions}`
+        : typeof params.sync_permissions === "boolean"
+          ? ` lock_permissions=${params.sync_permissions}`
+          : "";
+      return t(
+        lang,
+        `Move channel ${channelRefFromParams(params)} → ${parentRef}${lock}`,
+        `チャンネル移動 ${channelRefFromParams(params)} → ${parentRef}${lock}`
+      );
     }
     case "delete_channel":
       return t(lang, `Delete channel ${channelRefFromParams(params)}`, `チャンネル削除 ${channelRefFromParams(params)}`);
@@ -549,6 +570,20 @@ const inferObservationFallback = (action: PlannedAction, userText: string): Plan
         params: { type: wantsVoice ? "voice" : "any", limit: 25 },
         destructive: false
       };
+    }
+  }
+
+  if (action.action === "move_channel") {
+    const params = (action.params as Record<string, unknown> | undefined) ?? {};
+    const channelId = params.channel_id;
+    const channelName = params.channel_name;
+    const parentId = params.parent_id ?? params.category_id;
+    const parentName = params.parent_name ?? params.category_name;
+    if (!channelId && !channelName) {
+      return { action: "list_channels", params: { type: "any", limit: 25 }, destructive: false };
+    }
+    if (!parentId && !parentName) {
+      return { action: "list_channels", params: { type: "category", limit: 25 }, destructive: false };
     }
   }
 

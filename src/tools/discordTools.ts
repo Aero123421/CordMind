@@ -27,12 +27,31 @@ const extractRoleId = (value: unknown): string | null => extractId(value, /<@&(\
 const extractChannelId = (value: unknown): string | null => extractId(value, /<#(\d+)>/);
 
 const resolveChannel = async (guild: Guild, id?: string, name?: string) => {
-  if (id) {
-    return guild.channels.fetch(id);
+  const resolvedId =
+    extractChannelId(id) ??
+    (typeof id === "string" && /^\d+$/.test(id) ? id : null);
+  if (resolvedId) {
+    return guild.channels.fetch(resolvedId);
   }
   if (name) {
     const channels = await guild.channels.fetch();
     return channels.find((channel) => channel?.name === name) ?? null;
+  }
+  return null;
+};
+
+const resolveCategory = async (guild: Guild, id?: string, name?: string) => {
+  const resolvedId =
+    extractChannelId(id) ??
+    (typeof id === "string" && /^\d+$/.test(id) ? id : null);
+  if (resolvedId) {
+    const channel = await guild.channels.fetch(resolvedId);
+    if (channel?.type === ChannelType.GuildCategory) return channel;
+    return null;
+  }
+  if (name) {
+    const channels = await guild.channels.fetch();
+    return channels.find((channel) => channel?.type === ChannelType.GuildCategory && channel?.name === name) ?? null;
   }
   return null;
 };
@@ -542,6 +561,71 @@ export const renameChannel: ToolHandler = async (context, params) => {
     t(context.lang, `Channel renamed to ${newName}.`, `チャンネル名を ${newName} に変更しました。`),
     [channel.id],
     { id: channel.id, name: newName }
+  );
+};
+
+export const moveChannel: ToolHandler = async (context, params) => {
+  const channel = await resolveChannel(
+    context.guild,
+    params.channel_id as string | undefined,
+    params.channel_name as string | undefined
+  );
+  if (!channel || !("setParent" in channel)) {
+    return fail(t(context.lang, "Channel not found or cannot be moved.", "チャンネルが見つからないか、移動できません。"));
+  }
+
+  const parentIdRaw =
+    extractChannelId(params.parent_id) ??
+    extractChannelId(params.category_id) ??
+    (typeof params.parent_id === "string" && /^\d+$/.test(params.parent_id) ? params.parent_id : null) ??
+    (typeof params.category_id === "string" && /^\d+$/.test(params.category_id) ? params.category_id : null);
+  const parentNameRaw =
+    (typeof params.parent_name === "string" ? params.parent_name : null) ??
+    (typeof params.category_name === "string" ? params.category_name : null);
+
+  const parentName = parentNameRaw ? parentNameRaw.trim() : null;
+  const wantsNoParent = ["none", "no", "なし", "無し", "無", "null"].includes((parentName ?? "").toLowerCase());
+
+  let parentId: string | null = null;
+  if (parentIdRaw) {
+    parentId = parentIdRaw;
+  } else if (parentName && !wantsNoParent) {
+    const category = await resolveCategory(context.guild, undefined, parentName);
+    if (!category) {
+      return fail(t(context.lang, "Category not found.", "カテゴリが見つかりませんでした。"));
+    }
+    parentId = category.id;
+  } else if (!wantsNoParent) {
+    return fail(t(context.lang, "Missing parent_id or parent_name.", "parent_id または parent_name が必要です。"));
+  }
+
+  if (parentId) {
+    const category = await resolveCategory(context.guild, parentId, undefined);
+    if (!category) {
+      return fail(t(context.lang, "Target parent is not a category.", "移動先がカテゴリではありません。"));
+    }
+  }
+
+  const lockPermissions =
+    typeof params.lock_permissions === "boolean"
+      ? params.lock_permissions
+      : typeof params.sync_permissions === "boolean"
+        ? params.sync_permissions
+        : undefined;
+
+  await channel.setParent(parentId ?? null, lockPermissions === undefined ? undefined : { lockPermissions });
+
+  const positionRaw = params.position as number | string | undefined;
+  const position = typeof positionRaw === "string" ? Number(positionRaw) : positionRaw;
+  if (typeof position === "number" && Number.isFinite(position)) {
+    await channel.setPosition(Math.max(0, Math.floor(position)));
+  }
+
+  const parentLabel = parentId ? `<#${parentId}>` : t(context.lang, "(no category)", "(カテゴリなし)");
+  return ok(
+    t(context.lang, `Channel moved to ${parentLabel}.`, `チャンネルを ${parentLabel} に移動しました。`),
+    [channel.id, ...(parentId ? [parentId] : [])],
+    { id: channel.id, parentId: parentId ?? null, movedTo: parentId ?? null }
   );
 };
 

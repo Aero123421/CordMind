@@ -106,7 +106,7 @@ export const buildImpact = async (guild: Guild, action: string, params: Record<s
   const roleName = params.role_name as string | undefined;
   const userId = extractUserId(params.user_id) ?? extractUserId(params.user_mention) ?? (params.user_id as string | undefined);
 
-  if (["delete_channel", "rename_channel", "update_permission_overwrites"].includes(action)) {
+  if (["delete_channel", "rename_channel", "update_permission_overwrites", "move_channel"].includes(action)) {
     const channel = await resolveChannel(guild, channelId, channelName);
     const formatted = formatChannel(channel?.name ?? null, channel?.id ?? channelId);
     if (formatted) impact.channels = [formatted];
@@ -174,6 +174,25 @@ export const buildImpact = async (guild: Guild, action: string, params: Record<s
       impact.channels = impact.channels ?? [];
       impact.channels.push(`rename-to: #${newName}`);
     }
+  }
+
+  if (action === "move_channel") {
+    const parentId =
+      extractChannelId(params.parent_id) ??
+      extractChannelId(params.category_id) ??
+      (params.parent_id as string | undefined) ??
+      (params.category_id as string | undefined);
+    const parentName = (params.parent_name as string | undefined) ?? (params.category_name as string | undefined);
+    const parent = await resolveChannel(guild, parentId, parentName);
+    const label = parent
+      ? formatChannel(parent.name, parent.id)
+      : parentName
+        ? `#${parentName}`
+        : parentId
+          ? `#unknown (${parentId})`
+          : "(no category)";
+    impact.channels = impact.channels ?? [];
+    impact.channels.push(`move-to: ${label}`);
   }
 
   if (action === "update_permission_overwrites") {
