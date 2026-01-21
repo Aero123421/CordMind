@@ -4,12 +4,15 @@ import {
   GuildMember,
   PermissionsBitField,
   Role,
+  type AnyThreadChannel,
   type GuildChannelTypes,
   type ColorResolvable
 } from "discord.js";
 import type { ToolContext, ToolHandler, ToolResult } from "./types.js";
 import { t } from "../i18n.js";
 import { runDiagnostics, type DiagnosticsTopic } from "../diagnostics.js";
+import { checkRateLimit } from "../rateLimit.js";
+import { DESTRUCTIVE_LIMIT_PER_MIN } from "../constants.js";
 
 const extractId = (value: unknown, pattern: RegExp): string | null => {
   if (typeof value !== "string") return null;
@@ -21,6 +24,7 @@ const extractId = (value: unknown, pattern: RegExp): string | null => {
 
 const extractUserId = (value: unknown): string | null => extractId(value, /<@!?(\d+)>/);
 const extractRoleId = (value: unknown): string | null => extractId(value, /<@&(\d+)>/);
+const extractChannelId = (value: unknown): string | null => extractId(value, /<#(\d+)>/);
 
 const resolveChannel = async (guild: Guild, id?: string, name?: string) => {
   if (id) {
@@ -42,6 +46,24 @@ const resolveRole = async (guild: Guild, id?: string, name?: string): Promise<Ro
     return roles.find((role) => role.name === name) ?? null;
   }
   return null;
+};
+
+const resolveThreadById = async (context: ToolContext, rawId?: unknown): Promise<AnyThreadChannel | null> => {
+  const id =
+    extractChannelId(rawId) ??
+    (typeof rawId === "string" && /^\d+$/.test(rawId) ? rawId : null);
+  if (!id) return null;
+
+  const channel = await context.client.channels.fetch(id).catch(() => null);
+  if (!channel || !("isThread" in channel) || !channel.isThread()) return null;
+  if (channel.guildId !== context.guild.id) return null;
+  return channel;
+};
+
+const resolveThreadsByName = async (context: ToolContext, name: string): Promise<AnyThreadChannel[]> => {
+  const fetched = await context.guild.channels.fetchActiveThreads();
+  const target = name.trim().toLowerCase();
+  return Array.from(fetched.threads.values()).filter((thread) => thread.name.trim().toLowerCase() === target);
 };
 
 const resolveMemberById = async (guild: Guild, id?: string): Promise<GuildMember | null> => {
@@ -250,6 +272,154 @@ export const createThread: ToolHandler = async (context, params) => {
   }
 
   return fail(t(context.lang, "Channel does not support threads.", "このチャンネルはスレッドに対応していません。"));
+};
+
+export const listThreads: ToolHandler = async (context, params) => {
+  const limit = Math.min(50, Math.max(1, parseNumber(params.limit, 20)));
+  const nameContains = typeof params.name_contains === "string" ? params.name_contains.trim().toLowerCase() : null;
+  const prefix = typeof params.prefix === "string" ? params.prefix.trim().toLowerCase() : null;
+  const ownerId =
+    extractUserId(params.owner_id) ??
+    extractUserId(params.owner_mention) ??
+    (typeof params.owner_id === "string" && /^\d+$/.test(params.owner_id) ? params.owner_id : null);
+
+  const fetched = await context.guild.channels.fetchActiveThreads();
+  const threads = Array.from(fetched.threads.values())
+    .filter((thread) => (nameContains ? thread.name.toLowerCase().includes(nameContains) : true))
+    .filter((thread) => (prefix ? thread.name.toLowerCase().startsWith(prefix) : true))
+    .filter((thread) => (ownerId ? thread.ownerId === ownerId : true))
+    .sort((a, b) => (b.createdTimestamp ?? 0) - (a.createdTimestamp ?? 0))
+    .slice(0, limit);
+
+  if (threads.length === 0) {
+    return ok(t(context.lang, "No active threads found.", "アクティブなスレッドが見つかりませんでした。"));
+  }
+
+  const lines = threads
+    .map((thread) => {
+      const parent = thread.parentId ? `<#${thread.parentId}>` : "-";
+      const owner = thread.ownerId ? `<@${thread.ownerId}>` : "-";
+      const flags = [
+        thread.archived ? "archived" : null,
+        thread.locked ? "locked" : null
+      ].filter(Boolean).join(",");
+      const flagText = flags.length > 0 ? ` flags=${flags}` : "";
+      return `🧵 ${thread.name} (${thread.id}) parent=${parent} owner=${owner}${flagText}`;
+    })
+    .join("\n");
+
+  return ok(
+    t(context.lang, `Active threads:\n${lines}`, `アクティブスレッド一覧:\n${lines}`),
+    threads.map((thread) => thread.id)
+  );
+};
+
+export const deleteThread: ToolHandler = async (context, params) => {
+  const reason = typeof params.reason === "string" ? params.reason : undefined;
+  const byId =
+    (await resolveThreadById(context, params.thread_id ?? params.thread_mention ?? params.channel_id ?? params.channel_mention)) ??
+    (await resolveThreadById(context, params.id));
+
+  let thread: AnyThreadChannel | null = byId;
+  if (!thread) {
+    const name = typeof params.thread_name === "string" ? params.thread_name : typeof params.name === "string" ? params.name : null;
+    if (!name) return fail(t(context.lang, "Missing thread_id/thread_mention or thread_name.", "thread_id / thread_mention または thread_name が必要です。"));
+
+    const matches = await resolveThreadsByName(context, name);
+    if (matches.length === 0) return fail(t(context.lang, "Thread not found.", "スレッドが見つかりませんでした。"));
+    if (matches.length > 1) {
+      const list = matches.slice(0, 10).map((item) => `• ${item.name} (${item.id})`).join("\n");
+      return fail(t(context.lang, `Multiple threads matched. Specify thread_id:\n${list}`, `候補が複数あります。thread_id で指定してください:\n${list}`));
+    }
+    thread = matches[0];
+  }
+
+  await thread.delete(reason);
+  return ok(t(context.lang, `Thread deleted: ${thread.name}`, `スレッドを削除しました: ${thread.name}`), [thread.id]);
+};
+
+export const deleteThreads: ToolHandler = async (context, params) => {
+  const reason = typeof params.reason === "string" ? params.reason : undefined;
+  const limit = Math.min(25, Math.max(1, parseNumber(params.limit, 10)));
+  const nameContains = typeof params.name_contains === "string" ? params.name_contains.trim().toLowerCase() : null;
+  const prefix = typeof params.prefix === "string" ? params.prefix.trim().toLowerCase() : null;
+  const olderThanMinutes = typeof params.older_than_minutes === "number" || typeof params.older_than_minutes === "string"
+    ? parseNumber(params.older_than_minutes, 0)
+    : 0;
+
+  const ownerId =
+    extractUserId(params.owner_id) ??
+    extractUserId(params.owner_mention) ??
+    (typeof params.owner_id === "string" && /^\d+$/.test(params.owner_id) ? params.owner_id : null);
+
+  const includeCurrent = Boolean(params.include_current);
+  const excludeId = !includeCurrent && typeof params.exclude_thread_id === "string" ? params.exclude_thread_id : null;
+
+  const idsParam = Array.isArray(params.thread_ids) ? params.thread_ids : Array.isArray(params.ids) ? params.ids : null;
+  let targets: AnyThreadChannel[] = [];
+
+  if (idsParam) {
+    const ids = idsParam
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => extractChannelId(value) ?? value)
+      .filter((value): value is string => typeof value === "string" && /^\d+$/.test(value));
+
+    for (const id of ids) {
+      const thread = await resolveThreadById(context, id);
+      if (thread) targets.push(thread);
+      if (targets.length >= limit) break;
+    }
+  } else {
+    const fetched = await context.guild.channels.fetchActiveThreads();
+    targets = Array.from(fetched.threads.values())
+      .filter((thread) => (nameContains ? thread.name.toLowerCase().includes(nameContains) : true))
+      .filter((thread) => (prefix ? thread.name.toLowerCase().startsWith(prefix) : true))
+      .filter((thread) => (ownerId ? thread.ownerId === ownerId : true))
+      .filter((thread) => (olderThanMinutes > 0 ? (Date.now() - (thread.createdTimestamp ?? Date.now())) / 60_000 >= olderThanMinutes : true))
+      .sort((a, b) => (b.createdTimestamp ?? 0) - (a.createdTimestamp ?? 0))
+      .slice(0, limit);
+  }
+
+  if (excludeId) {
+    targets = targets.filter((thread) => thread.id !== excludeId);
+  }
+
+  if (targets.length === 0) {
+    return ok(t(context.lang, "No matching active threads found.", "対象のアクティブスレッドが見つかりませんでした。"));
+  }
+
+  const destructiveKey = `destructive:${context.guild.id}`;
+  const results: Array<{ ok: boolean; id: string; name: string; message?: string }> = [];
+
+  for (const thread of targets) {
+    if (!checkRateLimit(destructiveKey, DESTRUCTIVE_LIMIT_PER_MIN)) {
+      results.push({ ok: false, id: thread.id, name: thread.name, message: "rate_limit" });
+      break;
+    }
+
+    try {
+      await thread.delete(reason);
+      results.push({ ok: true, id: thread.id, name: thread.name });
+    } catch (error) {
+      results.push({ ok: false, id: thread.id, name: thread.name, message: "delete_failed" });
+    }
+  }
+
+  const deleted = results.filter((item) => item.ok);
+  const failed = results.filter((item) => !item.ok);
+  const preview = results
+    .slice(0, 8)
+    .map((item) => `• ${item.ok ? "OK" : "Failed"}: ${item.name} (${item.id})${item.message ? ` (${item.message})` : ""}`)
+    .join("\n");
+  const more = results.length > 8 ? ` (+${results.length - 8})` : "";
+
+  const summary = t(
+    context.lang,
+    `Deleted ${deleted.length} thread(s). Failed/Skipped: ${failed.length}.\n${preview}${more}`,
+    `${deleted.length}件のスレッドを削除しました。失敗/スキップ: ${failed.length}。\n${preview}${more}`
+  );
+
+  return ok(summary, deleted.map((item) => item.id));
 };
 
 export const pinMessage: ToolHandler = async (context, params) => {

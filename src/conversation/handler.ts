@@ -79,6 +79,16 @@ const channelRefFromParams = (params: Record<string, unknown>) => {
   return mention.channel(channelId) ?? (channelName ? `#${channelName}` : "(channel)");
 };
 
+const threadRefFromParams = (params: Record<string, unknown>) => {
+  const threadId = extractMentionId(params.thread_id, /<#(\d+)>/) ??
+    extractMentionId(params.thread_mention, /<#(\d+)>/) ??
+    extractMentionId(params.id, /<#(\d+)>/) ??
+    (typeof params.thread_id === "string" ? params.thread_id : undefined) ??
+    (typeof params.id === "string" ? params.id : undefined);
+  const threadName = typeof params.thread_name === "string" ? params.thread_name : typeof params.name === "string" ? params.name : undefined;
+  return mention.channel(threadId) ?? (threadName ? `🧵${threadName}` : "(thread)");
+};
+
 const roleRefFromParams = (params: Record<string, unknown>) => {
   const roleId = extractMentionId(params.role_id, /<@&(\d+)>/) ?? (typeof params.role_id === "string" ? params.role_id : undefined);
   const roleName = typeof params.role_name === "string" ? params.role_name : undefined;
@@ -151,6 +161,20 @@ const summarizeActionForDisplay = (action: PlannedAction, lang: string | null | 
       const name = typeof params.name === "string" ? params.name : "(thread)";
       return t(lang, `Create thread: ${name} in ${channelRefFromParams(params)}`, `スレッド作成: ${name} / ${channelRefFromParams(params)}`);
     }
+    case "list_threads": {
+      const prefix = typeof params.prefix === "string" ? ` prefix="${params.prefix}"` : "";
+      const contains = typeof params.name_contains === "string" ? ` contains="${params.name_contains}"` : "";
+      const limit = typeof params.limit === "number" || typeof params.limit === "string" ? ` limit=${params.limit}` : "";
+      return t(lang, `List threads${prefix}${contains}${limit}`, `スレッド一覧${prefix}${contains}${limit}`);
+    }
+    case "delete_thread":
+      return t(lang, `Delete thread ${threadRefFromParams(params)}`, `スレッド削除 ${threadRefFromParams(params)}`);
+    case "delete_threads": {
+      const prefix = typeof params.prefix === "string" ? ` prefix="${params.prefix}"` : "";
+      const contains = typeof params.name_contains === "string" ? ` contains="${params.name_contains}"` : "";
+      const limit = typeof params.limit === "number" || typeof params.limit === "string" ? ` limit=${params.limit}` : "";
+      return t(lang, `Delete threads${prefix}${contains}${limit}`, `スレッド一括削除${prefix}${contains}${limit}`);
+    }
     default:
       return t(lang, `Run ${action.action}`, `${action.action} を実行`);
   }
@@ -206,6 +230,7 @@ const buildMessages = async (message: Message, lang: string | null | undefined, 
 
 const OBSERVATION_ACTIONS = new Set([
   "diagnose_guild",
+  "list_threads",
   "list_channels",
   "get_channel_details",
   "list_roles",
@@ -295,6 +320,19 @@ const inferObservationFallback = (action: PlannedAction, userText: string): Plan
     const channelName = (action.params as Record<string, unknown> | undefined)?.channel_name;
     if (!channelId && !channelName) {
       return { action: "list_channels", params: { type: "any", limit: 25 }, destructive: false };
+    }
+  }
+
+  if (["delete_thread", "delete_threads"].includes(action.action)) {
+    const params = (action.params as Record<string, unknown> | undefined) ?? {};
+    const threadId = params.thread_id ?? params.thread_mention ?? params.id;
+    const threadIds = params.thread_ids ?? params.ids;
+    const name = params.thread_name ?? params.name;
+    if (!threadId && !threadIds && !name) {
+      const prefix = text.includes("discord-ai") || text.includes("aimanager") || text.includes("bot") || text.includes("ボット")
+        ? "discord-ai |"
+        : undefined;
+      return { action: "list_threads", params: { ...(prefix ? { prefix } : {}), limit: 25 }, destructive: false };
     }
   }
 
@@ -487,7 +525,18 @@ export const handleThreadMessage = async (message: Message) => {
       }
     }
 
-    const actions = normalizeActions(plan).filter((action) => action.action !== "none");
+    let actions = normalizeActions(plan).filter((action) => action.action !== "none");
+
+    actions = actions.map((planned) => {
+      if (planned.action === "delete_threads") {
+        const params = planned.params ?? {};
+        const includeCurrent = Boolean((params as Record<string, unknown>).include_current);
+        if (!includeCurrent && message.channel instanceof ThreadChannel) {
+          return { ...planned, params: { ...params, exclude_thread_id: message.channel.id } };
+        }
+      }
+      return planned;
+    });
     if (actions.length === 0) {
       await message.reply(plan.reply);
       return;
@@ -808,7 +857,18 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
     }))
     .filter((item) => typeof item.action === "string" && item.action.length > 0);
 
-  if (actions.length === 0) {
+  const normalizedActions: PlannedAction[] = actions.map((planned) => {
+    if (planned.action === "delete_threads") {
+      const params = planned.params ?? {};
+      const includeCurrent = Boolean((params as Record<string, unknown>).include_current);
+      if (!includeCurrent) {
+        return { ...planned, params: { ...params, exclude_thread_id: interaction.channelId } };
+      }
+    }
+    return planned;
+  });
+
+  if (normalizedActions.length === 0) {
     await interaction.reply({ ephemeral: true, content: t(lang, "No actions to execute.", "実行する操作がありません。") });
     return;
   }
@@ -841,7 +901,7 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
 
   const results: Array<{ action: string; ok: boolean; message: string; discordIds?: string[] }> = [];
 
-  for (const action of actions) {
+  for (const action of normalizedActions) {
     if (!checkRateLimit(interaction.guild.id, settings.rate_limit_per_min)) {
       results.push({
         action: action.action,
@@ -852,7 +912,8 @@ export const handleConfirmation = async (interaction: import("discord.js").Butto
     }
 
     const isDestructive = DESTRUCTIVE_ACTIONS.has(action.action);
-    if (isDestructive && !checkRateLimit(`destructive:${interaction.guild.id}`, DESTRUCTIVE_LIMIT_PER_MIN)) {
+    const usesInternalDestructiveLimiter = action.action === "delete_threads";
+    if (isDestructive && !usesInternalDestructiveLimiter && !checkRateLimit(`destructive:${interaction.guild.id}`, DESTRUCTIVE_LIMIT_PER_MIN)) {
       results.push({
         action: action.action,
         ok: false,

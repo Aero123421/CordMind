@@ -17,6 +17,7 @@ import { upsertThreadState } from "./conversation/threadState.js";
 import { cleanupAuditEvents } from "./audit.js";
 import { sendAuditLog } from "./auditLog.js";
 import { t } from "./i18n.js";
+import { db } from "./db.js";
 
 const client = new Client({
   intents: [
@@ -123,6 +124,48 @@ client.on(Events.MessageCreate, async (message) => {
 
   try {
     const cleaned = message.content.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
+    const cleanedLower = cleaned.toLowerCase();
+    const forceNewThread =
+      cleanedLower.startsWith("new") ||
+      cleanedLower.includes("new thread") ||
+      cleaned.includes("新規") ||
+      cleaned.includes("別スレ") ||
+      cleanedLower.includes("separate thread");
+
+    if (!forceNewThread) {
+      const candidates = await db.threadState.findMany({
+        where: { guild_id: message.guild.id, owner_user_id: message.author.id },
+        orderBy: { updated_at: "desc" },
+        take: 10
+      });
+
+      for (const candidate of candidates) {
+        const existing = await client.channels.fetch(candidate.thread_id).catch(() => null);
+        if (!existing || !("isThread" in existing) || !existing.isThread()) continue;
+        if (existing.guildId !== message.guild.id) continue;
+        if (existing.archived) continue;
+
+        if (cleaned.length > 0) {
+          await upsertThreadState({
+            threadId: existing.id,
+            guildId: message.guild.id,
+            ownerUserId: message.author.id,
+            summary: cleaned
+          });
+          await existing.send(t(settings.language, `New request: ${cleaned}`, `新しい依頼: ${cleaned}`));
+        }
+
+        await message.reply(
+          t(
+            settings.language,
+            `You already have an active thread: <#${existing.id}>. Continue there. (Mention me with 'new' to create a new thread.)`,
+            `すでにアクティブなスレッドがあります: <#${existing.id}>。そこで続けてください。（新規作成は @Bot に「new」と付けて送ってください）`
+          )
+        );
+        return;
+      }
+    }
+
     const date = new Date();
     const topic = cleaned.length > 0 ? cleaned.replace(/\s+/g, " ").slice(0, 30) : "request";
     const threadName = `discord-ai | ${message.author.username} | ${topic} | ${date.toISOString().slice(0, 10)}`.slice(0, 100);
