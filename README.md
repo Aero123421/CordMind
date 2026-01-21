@@ -108,10 +108,22 @@ Go back to your Discord server.
 
 1.  **Request**: Mention the bot (`@CordMind`) with your request.
     > `@CordMind Create a private channel for moderators.`
-2.  **Plan & Review**: The bot proposes a plan (showing a Diff). Click `Accept` to execute.
-3.  **Manage Settings**: Use interactive menus.
-    *   `/discordaimanage setup`: First-time setup (language → provider → API key → model).
-    *   `/discordaimanage setting`: Change settings anytime (interactive menu).
+2.  **Threaded conversation**: The bot creates a dedicated thread. Continue there without mentions.
+3.  **Plan & Review**: For destructive changes, the bot shows a confirmation with `Accept` / `Reject`.
+    - Only the requester can click `Accept`.
+4.  **Manage Settings**: Use interactive menus.
+    - `/discordaimanage setup`: First-time guided setup (language → provider → API key → model).
+    - `/discordaimanage setting`: Change settings anytime (interactive menu).
+    - `Guided setup` is also available from the settings menu.
+
+---
+
+## 🤖 LLM Providers & Models
+
+- API keys are stored **per provider**.
+- The model list is fetched from each provider API and cached for 24 hours.
+- If no API key is set, fallback model lists are used.
+- Switching providers resets the selected model (pick again).
 
 ---
 
@@ -119,6 +131,8 @@ Go back to your Discord server.
 
 *   **Bot doesn't reply in threads**:
     *   Double-check that **Message Content Intent** is enabled in the Discord Developer Portal.
+*   **Missing bot permissions**:
+    *   Ensure the bot role has the required permissions (Manage Channels, Manage Roles, Manage Threads, etc.).
 *   **Startup fails**:
     *   Ensure `DISCORDAI_ENCRYPTION_KEY` is a valid 32-byte Base64 string.
 *   **Database errors**:

@@ -1,4 +1,4 @@
-import type { ToolHandler } from "./types.js";
+import type { ToolHandler, ToolMeta } from "./types.js";
 import {
   listChannels,
   getChannelDetails,
@@ -28,31 +28,33 @@ import {
   untimeoutMember
 } from "./discordTools.js";
 
-export const toolRegistry: Record<string, ToolHandler> = {
-  list_channels: listChannels,
-  get_channel_details: getChannelDetails,
-  create_channel: createChannel,
-  create_thread: createThread,
-  pin_message: pinMessage,
-  rename_channel: renameChannel,
-  delete_channel: deleteChannel,
-  list_threads: listThreads,
-  delete_thread: deleteThread,
-  delete_threads: deleteThreads,
-  list_roles: listRoles,
-  get_role_details: getRoleDetails,
-  create_role: createRole,
-  delete_role: deleteRole,
-  assign_role: assignRole,
-  remove_role: removeRole,
-  update_permission_overwrites: updatePermissionOverwrites,
-  get_guild_permissions: getGuildPermissions,
-  get_bot_permissions: getBotPermissions,
-  diagnose_guild: diagnoseGuild,
-  find_members: findMembers,
-  get_member_details: getMemberDetails,
-  kick_member: kickMember,
-  ban_member: banMember,
-  timeout_member: timeoutMember,
-  untimeout_member: untimeoutMember
+export const toolRegistry: Record<string, ToolEntry> = {
+  list_channels: { handler: listChannels, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  get_channel_details: { handler: getChannelDetails, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  create_channel: { handler: createChannel, meta: { risk: "high", requiredBotPerms: ["ManageChannels"] } },
+  create_thread: { handler: createThread, meta: { risk: "high", requiredBotPerms: ["CreatePublicThreads"] } },
+  pin_message: { handler: pinMessage, meta: { risk: "low", requiredBotPerms: ["ManageMessages"] } },
+  rename_channel: { handler: renameChannel, meta: { risk: "high", requiredBotPerms: ["ManageChannels"] } },
+  delete_channel: { handler: deleteChannel, meta: { risk: "destructive", requiredBotPerms: ["ManageChannels"] } },
+  list_threads: { handler: listThreads, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  delete_thread: { handler: deleteThread, meta: { risk: "destructive", requiredBotPerms: ["ManageThreads"] } },
+  delete_threads: { handler: deleteThreads, meta: { risk: "destructive", requiredBotPerms: ["ManageThreads"] } },
+  list_roles: { handler: listRoles, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  get_role_details: { handler: getRoleDetails, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  create_role: { handler: createRole, meta: { risk: "high", requiredBotPerms: ["ManageRoles"] } },
+  delete_role: { handler: deleteRole, meta: { risk: "destructive", requiredBotPerms: ["ManageRoles"] } },
+  assign_role: { handler: assignRole, meta: { risk: "high", requiredBotPerms: ["ManageRoles"] } },
+  remove_role: { handler: removeRole, meta: { risk: "high", requiredBotPerms: ["ManageRoles"] } },
+  update_permission_overwrites: { handler: updatePermissionOverwrites, meta: { risk: "high", requiredBotPerms: ["ManageChannels"] } },
+  get_guild_permissions: { handler: getGuildPermissions, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  get_bot_permissions: { handler: getBotPermissions, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  diagnose_guild: { handler: diagnoseGuild, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  find_members: { handler: findMembers, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  get_member_details: { handler: getMemberDetails, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  kick_member: { handler: kickMember, meta: { risk: "destructive", requiredBotPerms: ["KickMembers"] } },
+  ban_member: { handler: banMember, meta: { risk: "destructive", requiredBotPerms: ["BanMembers"] } },
+  timeout_member: { handler: timeoutMember, meta: { risk: "destructive", requiredBotPerms: ["ModerateMembers"] } },
+  untimeout_member: { handler: untimeoutMember, meta: { risk: "destructive", requiredBotPerms: ["ModerateMembers"] } }
 };
+
+export type ToolEntry = { handler: ToolHandler; meta: ToolMeta };

@@ -136,7 +136,7 @@ const mapChannelType = (value?: string): ChannelType => {
   }
 };
 
-const ok = (message: string, ids?: string[]): ToolResult => ({ ok: true, message, discordIds: ids });
+const ok = (message: string, ids?: string[], data?: unknown): ToolResult => ({ ok: true, message, discordIds: ids, data });
 const fail = (message: string): ToolResult => ({ ok: false, message });
 
 const isDiagnosticsTopic = (value: unknown): value is DiagnosticsTopic =>
@@ -182,7 +182,7 @@ export const listChannels: ToolHandler = async (context, params) => {
   const limit = Math.min(50, Math.max(1, Math.floor(parseNumber(params.limit, 20))));
 
   const channels = await context.guild.channels.fetch();
-  const list = channels
+  const filtered = channels
     .filter((channel) => Boolean(channel))
     .filter((channel) => matchesType(channel!.type, typeFilter))
     .filter((channel) => (nameContains ? channel!.name.toLowerCase().includes(nameContains) : true))
@@ -192,16 +192,32 @@ export const listChannels: ToolHandler = async (context, params) => {
       const userLimit = "userLimit" in channel! && typeof (channel as unknown as { userLimit?: unknown }).userLimit === "number"
         ? (channel as unknown as { userLimit: number }).userLimit
         : null;
-      const extra = [
-        `type=${typeLabel}`,
-        parentId ? `parent_id=${parentId}` : null,
-        userLimit !== null ? `user_limit=${userLimit}` : null
-      ].filter(Boolean).join(" ");
-      return `#${channel?.name} (${channel?.id}) ${extra}`;
+      return {
+        id: channel?.id ?? "",
+        name: channel?.name ?? "",
+        type: typeLabel,
+        parentId,
+        userLimit
+      };
     })
-    .slice(0, limit)
+    .slice(0, limit);
+
+  const list = filtered
+    .map((channel) => {
+      const extra = [
+        channel.type ? `type=${channel.type}` : null,
+        channel.parentId ? `parent_id=${channel.parentId}` : null,
+        channel.userLimit !== null && channel.userLimit !== undefined ? `user_limit=${channel.userLimit}` : null
+      ].filter(Boolean).join(" ");
+      return `#${channel.name} (${channel.id}) ${extra}`.trim();
+    })
     .join("\n");
-  return ok(list.length > 0 ? list : t(context.lang, "No channels found.", "チャンネルが見つかりませんでした。"));
+
+  return ok(
+    list.length > 0 ? list : t(context.lang, "No channels found.", "チャンネルが見つかりませんでした。"),
+    filtered.map((channel) => channel.id),
+    { channels: filtered }
+  );
 };
 
 export const getChannelDetails: ToolHandler = async (context, params) => {
@@ -211,12 +227,25 @@ export const getChannelDetails: ToolHandler = async (context, params) => {
     params.channel_name as string | undefined
   );
   if (!channel) return fail(t(context.lang, "Channel not found.", "チャンネルが見つかりませんでした。"));
+  const parentId = "parentId" in channel && typeof channel.parentId === "string" ? channel.parentId : null;
+  const userLimit = "userLimit" in channel && typeof (channel as unknown as { userLimit?: unknown }).userLimit === "number"
+    ? (channel as unknown as { userLimit: number }).userLimit
+    : null;
+  const data = {
+    id: channel.id,
+    name: channel.name,
+    type: channelTypeLabel(channel.type),
+    parentId,
+    userLimit
+  };
   return ok(
     t(
       context.lang,
       `Channel ${channel.name} (${channel.id}) type=${channel.type}`,
       `チャンネル ${channel.name} (${channel.id}) type=${channel.type}`
-    )
+    ),
+    [channel.id],
+    data
   );
 };
 
@@ -243,7 +272,16 @@ export const createChannel: ToolHandler = async (context, params) => {
   const limitText = typeValue === ChannelType.GuildVoice && userLimit !== undefined ? ` user limit=${userLimit}` : "";
   return ok(
     t(context.lang, `Channel created: ${channel.name}${limitText}`, `チャンネルを作成しました: ${channel.name}${limitText}`),
-    [channel.id]
+    [channel.id],
+    {
+      id: channel.id,
+      name: channel.name,
+      type: channelTypeLabel(channel.type),
+      parentId: channel.parentId ?? null,
+      userLimit: "userLimit" in channel && typeof (channel as unknown as { userLimit?: unknown }).userLimit === "number"
+        ? (channel as unknown as { userLimit: number }).userLimit
+        : null
+    }
   );
 };
 
@@ -265,10 +303,18 @@ export const createThread: ToolHandler = async (context, params) => {
     if (messageId && "messages" in channel) {
       const message = await channel.messages.fetch(messageId);
       const thread = await message.startThread({ name, autoArchiveDuration });
-      return ok(t(context.lang, `Thread created: ${thread.name}.`, `スレッドを作成しました: ${thread.name}`), [thread.id]);
+      return ok(
+        t(context.lang, `Thread created: ${thread.name}.`, `スレッドを作成しました: ${thread.name}`),
+        [thread.id],
+        { id: thread.id, name: thread.name, parentId: thread.parentId ?? null, ownerId: thread.ownerId ?? null }
+      );
     }
     const thread = await channel.threads.create({ name, autoArchiveDuration });
-    return ok(t(context.lang, `Thread created: ${thread.name}.`, `スレッドを作成しました: ${thread.name}`), [thread.id]);
+    return ok(
+      t(context.lang, `Thread created: ${thread.name}.`, `スレッドを作成しました: ${thread.name}`),
+      [thread.id],
+      { id: thread.id, name: thread.name, parentId: thread.parentId ?? null, ownerId: thread.ownerId ?? null }
+    );
   }
 
   return fail(t(context.lang, "Channel does not support threads.", "このチャンネルはスレッドに対応していません。"));
@@ -292,8 +338,18 @@ export const listThreads: ToolHandler = async (context, params) => {
     .slice(0, limit);
 
   if (threads.length === 0) {
-    return ok(t(context.lang, "No active threads found.", "アクティブなスレッドが見つかりませんでした。"));
+    return ok(t(context.lang, "No active threads found.", "アクティブなスレッドが見つかりませんでした。"), [], { threads: [] });
   }
+
+  const data = threads.map((thread) => ({
+    id: thread.id,
+    name: thread.name,
+    parentId: thread.parentId,
+    ownerId: thread.ownerId,
+    archived: Boolean(thread.archived),
+    locked: Boolean(thread.locked),
+    createdTimestamp: thread.createdTimestamp ?? null
+  }));
 
   const lines = threads
     .map((thread) => {
@@ -312,7 +368,8 @@ export const listThreads: ToolHandler = async (context, params) => {
 
   return ok(
     t(context.lang, `Active threads:\n${lines}`, `アクティブスレッド一覧:\n${lines}`),
-    threads.map((thread) => thread.id)
+    threads.map((thread) => thread.id),
+    { threads: data }
   );
 };
 
@@ -337,7 +394,11 @@ export const deleteThread: ToolHandler = async (context, params) => {
   }
 
   await thread.delete(reason);
-  return ok(t(context.lang, `Thread deleted: ${thread.name}`, `スレッドを削除しました: ${thread.name}`), [thread.id]);
+  return ok(
+    t(context.lang, `Thread deleted: ${thread.name}`, `スレッドを削除しました: ${thread.name}`),
+    [thread.id],
+    { deleted: [{ id: thread.id, name: thread.name }] }
+  );
 };
 
 export const deleteThreads: ToolHandler = async (context, params) => {
@@ -433,7 +494,10 @@ export const deleteThreads: ToolHandler = async (context, params) => {
     `${deleted.length}件のスレッドを削除しました。失敗/スキップ: ${failed.length}。\n${preview}${more}`
   );
 
-  return ok(summary, deleted.map((item) => item.id));
+  return ok(summary, deleted.map((item) => item.id), {
+    deleted: deleted.map((item) => ({ id: item.id, name: item.name })),
+    failed: failed.map((item) => ({ id: item.id, name: item.name, reason: item.message ?? "" }))
+  });
 };
 
 export const pinMessage: ToolHandler = async (context, params) => {
@@ -451,7 +515,11 @@ export const pinMessage: ToolHandler = async (context, params) => {
 
   const message = await channel.messages.fetch(messageId);
   await message.pin();
-  return ok(t(context.lang, "Message pinned.", "メッセージをピン留めしました。"), [message.id]);
+  return ok(
+    t(context.lang, "Message pinned.", "メッセージをピン留めしました。"),
+    [message.id],
+    { messageId: message.id, channelId: channel.id }
+  );
 };
 
 export const renameChannel: ToolHandler = async (context, params) => {
@@ -464,7 +532,11 @@ export const renameChannel: ToolHandler = async (context, params) => {
   const newName = params.new_name as string | undefined;
   if (!newName) return fail(t(context.lang, "Missing new_name.", "new_name が必要です。"));
   await channel.setName(newName);
-  return ok(t(context.lang, `Channel renamed to ${newName}.`, `チャンネル名を ${newName} に変更しました。`), [channel.id]);
+  return ok(
+    t(context.lang, `Channel renamed to ${newName}.`, `チャンネル名を ${newName} に変更しました。`),
+    [channel.id],
+    { id: channel.id, name: newName }
+  );
 };
 
 export const deleteChannel: ToolHandler = async (context, params) => {
@@ -475,16 +547,30 @@ export const deleteChannel: ToolHandler = async (context, params) => {
   );
   if (!channel) return fail(t(context.lang, "Channel not found.", "チャンネルが見つかりませんでした。"));
   await channel.delete();
-  return ok(t(context.lang, `Channel deleted: ${channel.name}.`, `チャンネルを削除しました: ${channel.name}`));
+  return ok(
+    t(context.lang, `Channel deleted: ${channel.name}.`, `チャンネルを削除しました: ${channel.name}`),
+    [channel.id],
+    { id: channel.id, name: channel.name }
+  );
 };
 
 export const listRoles: ToolHandler = async (context) => {
   const roles = await context.guild.roles.fetch();
-  const list = roles
-    .map((role) => `${role.name} (${role.id})`)
+  const data = roles.map((role) => ({
+    id: role.id,
+    name: role.name,
+    position: role.position,
+    isAdmin: role.permissions.has(PermissionsBitField.Flags.Administrator)
+  }));
+  const list = data
     .slice(0, 20)
+    .map((role) => `${role.name} (${role.id})`)
     .join("\n");
-  return ok(list.length > 0 ? list : t(context.lang, "No roles found.", "ロールが見つかりませんでした。"));
+  return ok(
+    list.length > 0 ? list : t(context.lang, "No roles found.", "ロールが見つかりませんでした。"),
+    data.slice(0, 20).map((role) => role.id),
+    { roles: data }
+  );
 };
 
 export const getRoleDetails: ToolHandler = async (context, params) => {
@@ -494,7 +580,18 @@ export const getRoleDetails: ToolHandler = async (context, params) => {
     params.role_name as string | undefined
   );
   if (!role) return fail(t(context.lang, "Role not found.", "ロールが見つかりませんでした。"));
-  return ok(t(context.lang, `Role ${role.name} (${role.id}) color=${role.color}`, `ロール ${role.name} (${role.id}) color=${role.color}`));
+  const data = {
+    id: role.id,
+    name: role.name,
+    color: role.color,
+    position: role.position,
+    permissions: role.permissions.toArray()
+  };
+  return ok(
+    t(context.lang, `Role ${role.name} (${role.id}) color=${role.color}`, `ロール ${role.name} (${role.id}) color=${role.color}`),
+    [role.id],
+    data
+  );
 };
 
 export const createRole: ToolHandler = async (context, params) => {
@@ -506,7 +603,11 @@ export const createRole: ToolHandler = async (context, params) => {
     hoist: params.hoist as boolean | undefined,
     mentionable: params.mentionable as boolean | undefined
   });
-  return ok(t(context.lang, `Role created: ${role.name}.`, `ロールを作成しました: ${role.name}`), [role.id]);
+  return ok(
+    t(context.lang, `Role created: ${role.name}.`, `ロールを作成しました: ${role.name}`),
+    [role.id],
+    { id: role.id, name: role.name }
+  );
 };
 
 export const deleteRole: ToolHandler = async (context, params) => {
@@ -517,7 +618,11 @@ export const deleteRole: ToolHandler = async (context, params) => {
   );
   if (!role) return fail(t(context.lang, "Role not found.", "ロールが見つかりませんでした。"));
   await role.delete();
-  return ok(t(context.lang, `Role deleted: ${role.name}.`, `ロールを削除しました: ${role.name}`));
+  return ok(
+    t(context.lang, `Role deleted: ${role.name}.`, `ロールを削除しました: ${role.name}`),
+    [role.id],
+    { id: role.id, name: role.name }
+  );
 };
 
 export const assignRole: ToolHandler = async (context, params) => {
@@ -531,7 +636,11 @@ export const assignRole: ToolHandler = async (context, params) => {
   );
   if (!role) return fail(t(context.lang, "Role not found.", "ロールが見つかりませんでした。"));
   await member.roles.add(role);
-  return ok(t(context.lang, `Role ${role.name} assigned to ${member.user.tag}.`, `${member.user.tag} にロール ${role.name} を付与しました。`));
+  return ok(
+    t(context.lang, `Role ${role.name} assigned to ${member.user.tag}.`, `${member.user.tag} にロール ${role.name} を付与しました。`),
+    [member.id, role.id],
+    { memberId: member.id, roleId: role.id, roleName: role.name }
+  );
 };
 
 export const removeRole: ToolHandler = async (context, params) => {
@@ -545,7 +654,11 @@ export const removeRole: ToolHandler = async (context, params) => {
   );
   if (!role) return fail(t(context.lang, "Role not found.", "ロールが見つかりませんでした。"));
   await member.roles.remove(role);
-  return ok(t(context.lang, `Role ${role.name} removed from ${member.user.tag}.`, `${member.user.tag} からロール ${role.name} を剥奪しました。`));
+  return ok(
+    t(context.lang, `Role ${role.name} removed from ${member.user.tag}.`, `${member.user.tag} からロール ${role.name} を剥奪しました。`),
+    [member.id, role.id],
+    { memberId: member.id, roleId: role.id, roleName: role.name }
+  );
 };
 
 export const updatePermissionOverwrites: ToolHandler = async (context, params) => {
@@ -586,20 +699,28 @@ export const updatePermissionOverwrites: ToolHandler = async (context, params) =
       context.lang,
       `Permissions updated for ${targetRole ? targetRole.name : targetUser?.user.tag}.`,
       `権限を更新しました: ${targetRole ? targetRole.name : targetUser?.user.tag}`
-    )
+    ),
+    [],
+    {
+      channelId: channel.id,
+      targetRoleId: targetRole?.id ?? null,
+      targetUserId: targetUser?.id ?? null,
+      allow,
+      deny
+    }
   );
 };
 
 export const getGuildPermissions: ToolHandler = async (context) => {
   const member = await context.guild.members.fetch(context.actor.id);
   const perms = member.permissions.toArray().join(", ");
-  return ok(t(context.lang, `Your permissions: ${perms}`, `あなたの権限: ${perms}`));
+  return ok(t(context.lang, `Your permissions: ${perms}`, `あなたの権限: ${perms}`), [member.id], { permissions: member.permissions.toArray() });
 };
 
 export const getBotPermissions: ToolHandler = async (context) => {
   const botMember = await context.guild.members.fetch(context.client.user?.id ?? "");
   const perms = botMember.permissions.toArray().join(", ");
-  return ok(t(context.lang, `Bot permissions: ${perms}`, `Bot の権限: ${perms}`));
+  return ok(t(context.lang, `Bot permissions: ${perms}`, `Bot の権限: ${perms}`), [botMember.id], { permissions: botMember.permissions.toArray() });
 };
 
 export const diagnoseGuild: ToolHandler = async (context, params) => {
@@ -618,13 +739,17 @@ export const findMembers: ToolHandler = async (context, params) => {
   const limit = Math.min(10, Math.max(1, parseNumber(params.limit, 5)));
   const results = await context.guild.members.search({ query: query.trim(), limit });
   const members = Array.from(results.values());
-  if (members.length === 0) return ok(t(context.lang, "No members found.", "メンバーが見つかりませんでした。"));
+  if (members.length === 0) return ok(t(context.lang, "No members found.", "メンバーが見つかりませんでした。"), [], { members: [] });
 
-  const list = members
-    .slice(0, limit)
-    .map((m) => `${m.user.tag} (${m.id})${m.nickname ? ` nickname=${m.nickname}` : ""}`)
+  const data = members.slice(0, limit).map((m) => ({
+    id: m.id,
+    tag: m.user.tag,
+    nickname: m.nickname ?? null
+  }));
+  const list = data
+    .map((m) => `${m.tag} (${m.id})${m.nickname ? ` nickname=${m.nickname}` : ""}`)
     .join("\n");
-  return ok(list, members.map((m) => m.id));
+  return ok(list, data.map((m) => m.id), { members: data });
 };
 
 export const getMemberDetails: ToolHandler = async (context, params) => {
@@ -637,6 +762,11 @@ export const getMemberDetails: ToolHandler = async (context, params) => {
     .map((role) => `${role.name} (${role.id})`)
     .slice(0, 20);
 
+  const roleData = member.roles.cache
+    .filter((role) => role.id !== context.guild.id)
+    .map((role) => ({ id: role.id, name: role.name }))
+    .slice(0, 30);
+
   return ok(
     [
       t(context.lang, `Member: ${member.user.tag} (${member.id})`, `メンバー: ${member.user.tag} (${member.id})`),
@@ -644,7 +774,14 @@ export const getMemberDetails: ToolHandler = async (context, params) => {
       t(context.lang, `Roles: ${roles.length > 0 ? roles.join(", ") : "(none)"}`, `ロール: ${roles.length > 0 ? roles.join(", ") : "(なし)"}`),
       member.joinedAt ? t(context.lang, `Joined: ${member.joinedAt.toISOString()}`, `参加日時: ${member.joinedAt.toISOString()}`) : null
     ].filter(Boolean).join("\n"),
-    [member.id]
+    [member.id],
+    {
+      id: member.id,
+      tag: member.user.tag,
+      nickname: member.nickname ?? null,
+      roles: roleData,
+      joinedAt: member.joinedAt ? member.joinedAt.toISOString() : null
+    }
   );
 };
 
@@ -665,7 +802,11 @@ export const kickMember: ToolHandler = async (context, params) => {
 
   const reason = typeof params.reason === "string" ? params.reason : undefined;
   await member.kick(reason);
-  return ok(t(context.lang, `Kicked ${member.user.tag}.`, `${member.user.tag} をキックしました。`), [member.id]);
+  return ok(
+    t(context.lang, `Kicked ${member.user.tag}.`, `${member.user.tag} をキックしました。`),
+    [member.id],
+    { memberId: member.id, action: "kick" }
+  );
 };
 
 export const banMember: ToolHandler = async (context, params) => {
@@ -679,7 +820,11 @@ export const banMember: ToolHandler = async (context, params) => {
   const reason = typeof params.reason === "string" ? params.reason : undefined;
   const deleteMessageSeconds = parseNumber(params.delete_message_seconds, 0);
   await member.ban({ reason, deleteMessageSeconds: deleteMessageSeconds > 0 ? deleteMessageSeconds : undefined });
-  return ok(t(context.lang, `Banned ${member.user.tag}.`, `${member.user.tag} をBANしました。`), [member.id]);
+  return ok(
+    t(context.lang, `Banned ${member.user.tag}.`, `${member.user.tag} をBANしました。`),
+    [member.id],
+    { memberId: member.id, action: "ban", deleteMessageSeconds: deleteMessageSeconds > 0 ? deleteMessageSeconds : 0 }
+  );
 };
 
 export const timeoutMember: ToolHandler = async (context, params) => {
@@ -700,7 +845,8 @@ export const timeoutMember: ToolHandler = async (context, params) => {
       `Timed out ${member.user.tag} for ${clampedMinutes} minutes.`,
       `${member.user.tag} を ${clampedMinutes} 分タイムアウトしました。`
     ),
-    [member.id]
+    [member.id],
+    { memberId: member.id, action: "timeout", minutes: clampedMinutes }
   );
 };
 
@@ -714,5 +860,9 @@ export const untimeoutMember: ToolHandler = async (context, params) => {
 
   const reason = typeof params.reason === "string" ? params.reason : undefined;
   await member.timeout(null, reason);
-  return ok(t(context.lang, `Timeout cleared for ${member.user.tag}.`, `${member.user.tag} のタイムアウトを解除しました。`), [member.id]);
+  return ok(
+    t(context.lang, `Timeout cleared for ${member.user.tag}.`, `${member.user.tag} のタイムアウトを解除しました。`),
+    [member.id],
+    { memberId: member.id, action: "untimeout" }
+  );
 };

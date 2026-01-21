@@ -32,6 +32,17 @@ const RATE_INPUT_ID = "modal:rate:value";
 
 const t = (lang: string | null | undefined, en: string, ja: string) => (lang === "ja" ? ja : en);
 
+const formatModelLabel = (model: string | null | undefined, provider: string, lang: string | null | undefined) => {
+  if (!model || model.trim().length === 0) {
+    return t(lang, "(not set)", "(未設定)");
+  }
+  const normalized = model.toLowerCase();
+  if (normalized.includes(provider.toLowerCase()) || model.includes("/")) {
+    return model;
+  }
+  return `${model} (${provider})`;
+};
+
 const buildLanguageRow = (scope: "setup" | "setting", current?: string | null) => {
   const select = new StringSelectMenuBuilder()
     .setCustomId(`${scope}:language`)
@@ -101,6 +112,7 @@ const buildSettingsMenu = (lang: string | null | undefined) => {
     .setCustomId("setting:menu")
     .setPlaceholder(t(lang, "What do you want to change?", "何を変更しますか？"))
     .addOptions(
+      { label: t(lang, "Guided setup", "ガイド付きセットアップ"), value: "wizard" },
       { label: t(lang, "Language", "言語"), value: "language" },
       { label: t(lang, "Provider", "プロバイダー"), value: "provider" },
       { label: t(lang, "API Key", "APIキー"), value: "api_key" },
@@ -144,6 +156,19 @@ const buildApiKeyStatus = async (guildId: string, provider: ProviderName, lang: 
   return `${providerLine}: ${provider}\n${keyLine}: ${keyStatus}`;
 };
 
+const buildApiKeyStatusAll = async (guildId: string, lang: string | null | undefined) => {
+  const statusLines = await Promise.all(
+    PROVIDERS.map(async (provider) => {
+      const hasKey = await hasProviderCredentials(guildId, provider as ProviderName);
+      return `• ${provider}: ${hasKey ? t(lang, "set", "設定済み") : t(lang, "not set", "未設定")}`;
+    })
+  );
+  return [
+    t(lang, "API keys are stored per provider.", "APIキーはプロバイダーごとに保存されます。"),
+    ...statusLines
+  ].join("\n");
+};
+
 const buildThreadArchiveRow = (lang: string | null | undefined, current?: number | null) => {
   const select = new StringSelectMenuBuilder()
     .setCustomId("setting:thread")
@@ -160,11 +185,12 @@ const buildThreadArchiveRow = (lang: string | null | undefined, current?: number
 const buildSummary = async (guildId: string, lang: string | null | undefined) => {
   const settings = await getGuildSettings(guildId);
   const hasKey = await hasProviderCredentials(guildId, settings.provider as ProviderName);
+  const modelLabel = formatModelLabel(settings.model, settings.provider, lang);
   return [
     t(lang, "Current settings", "現在の設定"),
     `• ${t(lang, "Language", "言語")}: ${settings.language}`,
     `• ${t(lang, "Provider", "プロバイダー")}: ${settings.provider}`,
-    `• ${t(lang, "Model", "モデル")}: ${settings.model ?? t(lang, "(not set)", "(未設定)")}`,
+    `• ${t(lang, "Model", "モデル")}: ${modelLabel}`,
     `• ${t(lang, "API key", "APIキー")}: ${hasKey ? t(lang, "set", "設定済み") : t(lang, "not set", "未設定")}`,
     `• ${t(lang, "Manager role", "管理ロール")}: ${settings.manager_role_id ?? t(lang, "(none)", "(なし)")}`,
     `• ${t(lang, "Log channel", "ログチャンネル")}: ${settings.log_channel_id ?? t(lang, "(none)", "(なし)")}`,
@@ -173,20 +199,54 @@ const buildSummary = async (guildId: string, lang: string | null | undefined) =>
   ].join("\n");
 };
 
+const buildSetupLanguageView = (lang: string | null | undefined, currentLang: string | null | undefined) => {
+  return {
+    content: t(
+      lang,
+      "Step 1/3: Choose your language (press Next to keep it).",
+      "ステップ1/3: 言語を選択してください（そのままなら次へ）"
+    ),
+    components: [buildLanguageRow("setup", currentLang), buildContinueRow("setup:language:next", lang)]
+  };
+};
+
+const buildSetupProviderView = (lang: string | null | undefined, provider: string) => {
+  const providerLine = t(lang, "Current provider", "現在のプロバイダー");
+  return {
+    content: t(
+      lang,
+      `Step 2/3: Choose your provider (press Next to keep it)\n${providerLine}: ${provider}`,
+      `ステップ2/3: プロバイダーを選択（そのままなら次へ）\n${providerLine}: ${provider}`
+    ),
+    components: [buildProviderRow("setup", provider), buildContinueRow("setup:provider:next", lang)]
+  };
+};
+
+const buildSetupModelView = async (
+  guildId: string,
+  lang: string | null | undefined,
+  provider: ProviderName,
+  model: string | null | undefined
+) => {
+  const nextText = t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください");
+  const providerLine = t(lang, "Current provider", "現在のプロバイダー");
+  const modelLine = t(lang, "Current model", "現在のモデル");
+  const apiStatus = await buildApiKeyStatusAll(guildId, lang);
+  const modelRow = await buildModelRow(guildId, "setup", provider, model, lang);
+  return {
+    content: `${nextText}\n${providerLine}: ${provider}\n${modelLine}: ${formatModelLabel(model, provider, lang)}\n${apiStatus}`,
+    components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
+  };
+};
+
 export const handleCommand = async (interaction: ChatInputCommandInteraction) => {
   if (!interaction.guildId) return;
   const subcommand = interaction.options.getSubcommand();
   const settings = await getGuildSettings(interaction.guildId);
 
   if (subcommand === "setup") {
-    await interaction.reply({
-      ephemeral: true,
-      content: "Choose your language / 言語を選択してください (Step 1/3)",
-      components: [
-        buildLanguageRow("setup", settings.language),
-        buildContinueRow("setup:language:next", settings.language)
-      ]
-    });
+    const view = buildSetupLanguageView(settings.language, settings.language);
+    await interaction.reply({ ephemeral: true, ...view });
     return;
   }
 
@@ -229,7 +289,9 @@ const showRateModal = async (interaction: import("discord.js").StringSelectMenuI
 };
 
 const showApiModal = async (interaction: import("discord.js").ButtonInteraction, lang: string | null | undefined) => {
-  const modal = new ModalBuilder().setCustomId(API_MODAL_ID).setTitle(t(lang, "Set API Key", "APIキー設定"));
+  const settings = await getGuildSettings(interaction.guildId ?? "");
+  const provider = settings.provider as ProviderName;
+  const modal = new ModalBuilder().setCustomId(API_MODAL_ID).setTitle(t(lang, `Set API Key (${provider})`, `APIキー設定 (${provider})`));
   const input = new TextInputBuilder()
     .setCustomId(API_INPUT_ID)
     .setLabel(t(lang, "API Key", "APIキー"))
@@ -250,28 +312,17 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
     if (scope === "setup" && action === "language") {
       await updateGuildSettings(interaction.guildId, { language: value });
-      const providerLine = t(value, "Current provider", "現在のプロバイダー");
-      await interaction.update({
-        content: t(
-          value,
-          `Step 2/3: Choose your provider (or press Next to keep it)\n${providerLine}: ${settings.provider}`,
-          `ステップ2/3: プロバイダーを選択（そのままなら次へ）\n${providerLine}: ${settings.provider}`
-        ),
-        components: [buildProviderRow("setup", settings.provider), buildContinueRow("setup:provider:next", value)]
-      });
+      const view = buildSetupProviderView(value, settings.provider);
+      await interaction.update(view);
       return;
     }
 
     if (scope === "setup" && action === "provider") {
       const provider = value as ProviderName;
-      await updateGuildSettings(interaction.guildId, { provider });
-      const nextText = t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください");
-      const apiStatus = await buildApiKeyStatus(interaction.guildId, provider, lang);
-      const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model, lang);
-      await interaction.update({
-        content: `${nextText}\n${apiStatus}`,
-        components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
-      });
+      const shouldClearModel = provider !== settings.provider;
+      await updateGuildSettings(interaction.guildId, shouldClearModel ? { provider, model: null } : { provider });
+      const view = await buildSetupModelView(interaction.guildId, lang, provider, shouldClearModel ? null : settings.model);
+      await interaction.update(view);
       return;
     }
 
@@ -281,15 +332,18 @@ export const handleComponent = async (interaction: import("discord.js").Interact
         return;
       }
       await updateGuildSettings(interaction.guildId, { model: value });
-      await interaction.update({
-        content: t(lang, "Setup complete. Use /discordaimanage setting to adjust anytime.", "セットアップ完了。いつでも /discordaimanage setting から変更できます。"),
-        components: []
-      });
+      const view = await buildSetupModelView(interaction.guildId, lang, settings.provider as ProviderName, value);
+      await interaction.update(view);
       return;
     }
 
     if (scope === "setting" && action === "menu") {
       switch (value) {
+        case "wizard": {
+          const view = buildSetupLanguageView(lang, settings.language);
+          await interaction.update(view);
+          return;
+        }
         case "language":
           await interaction.update({
             content: t(lang, "Choose language", "言語を選択してください"),
@@ -303,16 +357,16 @@ export const handleComponent = async (interaction: import("discord.js").Interact
           });
           return;
         case "api_key":
-          const apiStatus = await buildApiKeyStatus(interaction.guildId, settings.provider as ProviderName, lang);
+          const apiStatus = await buildApiKeyStatusAll(interaction.guildId, lang);
           await interaction.update({
-            content: `${t(lang, "Manage API Key", "APIキーを管理")}\n${apiStatus}`,
+            content: `${t(lang, "Manage API Key", "APIキーを管理")}\n${t(lang, "Current provider", "現在のプロバイダー")}: ${settings.provider}\n${apiStatus}`,
             components: [buildApiKeyRow("setting", lang), buildBackRow(lang)]
           });
           return;
         case "model":
           const modelRow = await buildModelRow(interaction.guildId, "setting", settings.provider as ProviderName, settings.model, lang);
           await interaction.update({
-            content: t(lang, "Choose model", "モデルを選択してください"),
+            content: `${t(lang, "Choose model", "モデルを選択してください")}\n${t(lang, "Current provider", "現在のプロバイダー")}: ${settings.provider}`,
             components: [modelRow, buildBackRow(lang)]
           });
           return;
@@ -374,7 +428,9 @@ export const handleComponent = async (interaction: import("discord.js").Interact
     }
 
     if (scope === "setting" && action === "provider") {
-      await updateGuildSettings(interaction.guildId, { provider: value });
+      const provider = value as ProviderName;
+      const shouldClearModel = provider !== settings.provider;
+      await updateGuildSettings(interaction.guildId, shouldClearModel ? { provider, model: null } : { provider });
       const summary = await buildSummary(interaction.guildId, lang);
       await interaction.update({
         content: summary,
@@ -414,34 +470,26 @@ export const handleComponent = async (interaction: import("discord.js").Interact
 
     if (scope === "setup" && action === "language" && subAction === "next") {
       const langNow = settings.language;
-      const providerLine = t(langNow, "Current provider", "現在のプロバイダー");
-      await interaction.update({
-        content: t(
-          langNow,
-          `Step 2/3: Choose your provider (or press Next to keep it)\n${providerLine}: ${settings.provider}`,
-          `ステップ2/3: プロバイダーを選択（そのままなら次へ）\n${providerLine}: ${settings.provider}`
-        ),
-        components: [buildProviderRow("setup", settings.provider), buildContinueRow("setup:provider:next", langNow)]
-      });
+      const view = buildSetupProviderView(langNow, settings.provider);
+      await interaction.update(view);
       return;
     }
 
     if (scope === "setup" && action === "provider" && subAction === "next") {
       const provider = settings.provider as ProviderName;
-      const nextText = t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください");
-      const apiStatus = await buildApiKeyStatus(interaction.guildId, provider, lang);
-      const modelRow = await buildModelRow(interaction.guildId, "setup", provider, settings.model, lang);
-      await interaction.update({
-        content: `${nextText}\n${apiStatus}`,
-        components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
-      });
+      const view = await buildSetupModelView(interaction.guildId, lang, provider, settings.model);
+      await interaction.update(view);
       return;
     }
 
     if (scope === "setup" && action === "model" && subAction === "next") {
-      const modelLine = settings.model
-        ? t(lang, `Model set: ${settings.model}`, `モデル設定済み: ${settings.model}`)
-        : t(lang, "Model not set yet.", "モデルは未設定です。");
+      if (!settings.model || settings.model.trim().length === 0) {
+        const warning = t(lang, "Model not set yet. Please choose one.", "モデルは未設定です。選択してください。");
+        const view = await buildSetupModelView(interaction.guildId, lang, settings.provider as ProviderName, settings.model);
+        await interaction.update({ content: `${warning}\n${view.content}`, components: view.components });
+        return;
+      }
+      const modelLine = t(lang, `Model set: ${formatModelLabel(settings.model, settings.provider, lang)}`, `モデル設定済み: ${formatModelLabel(settings.model, settings.provider, lang)}`);
       await interaction.update({
         content: `${t(lang, "Setup complete. Use /discordaimanage setting to adjust anytime.", "セットアップ完了。いつでも /discordaimanage setting から変更できます。")}\n${modelLine}`,
         components: []
@@ -491,12 +539,8 @@ export const handleComponent = async (interaction: import("discord.js").Interact
       }
 
       if (scope === "setup") {
-      const modelRow = await buildModelRow(interaction.guildId, "setup", settings.provider as ProviderName, settings.model, lang);
-        const apiStatus = await buildApiKeyStatus(interaction.guildId, settings.provider as ProviderName, lang);
-        await interaction.update({
-          content: `${t(lang, "Step 3/3: Set API key and choose model", "ステップ3/3: APIキーとモデルを設定してください")}\n${apiStatus}`,
-          components: [buildApiKeyRow("setup", lang), modelRow, buildContinueRow("setup:model:next", lang)]
-        });
+        const view = await buildSetupModelView(interaction.guildId, lang, settings.provider as ProviderName, settings.model);
+        await interaction.update(view);
       } else {
         const summary = await buildSummary(interaction.guildId, lang);
         await interaction.update({
@@ -571,10 +615,10 @@ export const handleModal = async (interaction: import("discord.js").ModalSubmitI
 
     const summary = await buildSummary(interaction.guildId, lang);
     const modelRow = await buildModelRow(interaction.guildId, "setting", provider, settings.model, lang);
-    const apiStatus = await buildApiKeyStatus(interaction.guildId, provider, lang);
+    const apiStatus = await buildApiKeyStatusAll(interaction.guildId, lang);
     await interaction.reply({
       ephemeral: true,
-      content: `${t(lang, "API key saved.", "APIキーを保存しました。")}\n${apiStatus}`,
+      content: `${t(lang, `API key saved for ${provider}.`, `${provider} のAPIキーを保存しました。`)}\n${apiStatus}`,
       components: [modelRow]
     });
     await interaction.followUp({
