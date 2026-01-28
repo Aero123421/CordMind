@@ -2,6 +2,7 @@ import type { ToolHandler, ToolMeta } from "./types.js";
 import {
   listChannels,
   getChannelDetails,
+  getPermissionOverwrites,
   createChannel,
   createThread,
   pinMessage,
@@ -33,6 +34,7 @@ import {
 export const toolRegistry: Record<string, ToolEntry> = {
   list_channels: { handler: listChannels, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
   get_channel_details: { handler: getChannelDetails, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
+  get_permission_overwrites: { handler: getPermissionOverwrites, meta: { risk: "read", requiredBotPerms: ["ViewChannel"] } },
   create_channel: { handler: createChannel, meta: { risk: "high", requiredBotPerms: ["ManageChannels"] } },
   create_thread: { handler: createThread, meta: { risk: "high", requiredBotPerms: ["CreatePublicThreads"] } },
   pin_message: { handler: pinMessage, meta: { risk: "low", requiredBotPerms: ["ManageMessages"] } },

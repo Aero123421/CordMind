@@ -139,6 +139,20 @@ Discord サーバーに戻って確認します。
 
 ---
 
+## 🧪 Evals（回帰チェック）
+
+ID要求、JSON丸出し、言語逸脱、破壊的操作の確認漏れなどを簡易チェックします。
+
+```bash
+npm run evals
+# strict モード（問題があれば終了コード1）
+npm run evals -- --strict
+```
+
+フィクスチャは `evals/fixtures/*.json` に置いてください。
+
+---
+
 <div align="center">
 Created with ❤️ for Discord Admins
 </div>

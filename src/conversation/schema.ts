@@ -68,7 +68,16 @@ export const agentStepSchema = {
     question: {
       type: "string"
     },
+    options: {
+      type: "array",
+      items: {
+        type: "string"
+      }
+    },
     reason: {
+      type: "string"
+    },
+    expected_impact: {
       type: "string"
     }
   },
@@ -109,7 +118,8 @@ export const buildSystemPrompt = (lang: string | null | undefined): string => {
     "Never output banned actions: " + banned + ".",
     "Step types: observe (one tool call), act (one or more tool calls), ask (clarifying question), finish (final response).",
     "For ask/finish, include question/reply in the user's language. Do NOT output tool calls in ask/finish.",
-    "For act steps, include a short reply that summarizes what you will do.",
+    "For ask steps, if there are multiple candidates, include options[] with human-readable names (avoid IDs).",
+    "For act steps, include a short reply that summarizes what you will do, plus reason and expected_impact when possible.",
     "Set destructive=true if the action deletes, revokes access, or could cause irreversible change.",
     "If the request is unclear, prefer observe or ask; do not reply with 'cannot interpret'.",
     "Always keep user-facing text concise and helpful. Never mix languages in user-facing text.",
@@ -117,9 +127,9 @@ export const buildSystemPrompt = (lang: string | null | undefined): string => {
     "If the user asks what you can do, reply with a short capability list and ask what they want next. Do not call tools.",
     "If the user asks for current members/participants, call list_members (limit=10) and ask if they want more.",
     "Use tool results (including data fields) to avoid asking for IDs when possible.",
-    "Output example (ask): {\"type\":\"ask\",\"question\":\"対象チャンネル名を教えてください\"}",
-    "Output example (observe): {\"type\":\"observe\",\"action\":\"list_channels\",\"params\":{\"type\":\"voice\",\"limit\":20}}",
-    "Output example (act): {\"type\":\"act\",\"actions\":[{\"action\":\"rename_channel\",\"params\":{\"channel_name\":\"general\",\"new_name\":\"lobby\"},\"destructive\":false}]}",
+    "Output example (ask): {\"type\":\"ask\",\"question\":\"対象を選んでください\",\"options\":[\"general\",\"general-chat\"]}",
+    "Output example (observe): {\"type\":\"observe\",\"action\":\"list_channels\",\"params\":{\"type\":\"voice\",\"limit\":20},\"reason\":\"候補を特定するため\"}",
+    "Output example (act): {\"type\":\"act\",\"actions\":[{\"action\":\"rename_channel\",\"params\":{\"channel_name\":\"general\",\"new_name\":\"lobby\"},\"destructive\":false}],\"reply\":\"general を lobby に変更します\",\"reason\":\"命名を統一したい\",\"expected_impact\":\"#general が #lobby に変わります\"}",
     "Output example (finish): {\"type\":\"finish\",\"reply\":\"完了しました。\"}",
     "Tool hints:",
     "- diagnose_guild params: topic (overview|permissions|roles|channels). Use this when the user asks for server issues/overview/diagnosis.",
@@ -127,6 +137,7 @@ export const buildSystemPrompt = (lang: string | null | undefined): string => {
     "- list_threads params: prefix (string), name_contains (string), owner_id/owner_mention, limit (number). Use this to find thread IDs.",
     "- list_channels params: type (text|voice|category|forum|any), name_contains (string), limit (number). Use this to find channel IDs/names.",
     "- get_channel_details params: channel_id or channel_name (exact).",
+    "- get_permission_overwrites params: channel_id or channel_name (exact), optional role_id/role_name or user_id/user_mention/query.",
     "- create_channel params: name (string, optional), type (text|voice|category|forum), parent_id, topic, user_limit (number, voice only).",
     "- rename_channel params: channel_id or channel_name (exact), new_name.",
     "- move_channel params: channel_id or channel_name (exact), parent_id or parent_name (category), lock_permissions (boolean), position (number). Use this to move a channel into/out of a category.",

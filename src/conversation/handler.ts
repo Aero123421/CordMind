@@ -134,15 +134,28 @@ const buildDestructiveConfirmationMessage = (
   lang: string | null | undefined,
   preface: string,
   actions: PlannedAction[],
-  impact: Impact
+  impact: Impact,
+  reason?: string,
+  expectedImpact?: string
 ) => {
   const lines: string[] = [];
   if (preface.trim().length > 0) lines.push(preface.trim());
+  const fallbackReason = !reason && preface.trim().length === 0 ? t(lang, "(not provided)", "(未提示)") : undefined;
+  const reasonLine = formatReasonLine(lang, reason ?? fallbackReason);
+  if (reasonLine) lines.push(reasonLine);
+  const expectedImpactLine = formatExpectedImpactLine(lang, expectedImpact);
+  if (expectedImpactLine) lines.push(expectedImpactLine);
   lines.push(t(lang, "This is a destructive change.", "破壊的な変更です。"));
   lines.push(`${t(lang, "Planned actions", "操作内容")}:\n${summarizeActionsForDisplay(actions, lang)}`);
   lines.push(`${t(lang, "Impact", "影響範囲")}:\n${formatImpact(impact, lang)}`);
   lines.push(t(lang, "Only the requester can Accept. Reject will cancel.", "Accept / Reject は依頼者のみ実行できます。Reject でキャンセルします。"));
   return lines.join("\n\n");
+};
+
+const sanitizeSingleLine = (value: string, maxChars: number) => {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  return normalized.length > maxChars ? normalized.slice(0, maxChars) : normalized;
 };
 
 const sanitizeConfirmationPreface = (preface: string, lang: string | null | undefined) => {
@@ -155,6 +168,43 @@ const sanitizeConfirmationPreface = (preface: string, lang: string | null | unde
   if (duplicateHints.some((hint) => lower.includes(hint))) return "";
   if (trimmed.length > 200) return trimmed.slice(0, 200);
   return trimmed;
+};
+
+const formatReasonLine = (lang: string | null | undefined, reason?: string) => {
+  if (!reason) return "";
+  const sanitized = sanitizeSingleLine(reason, 180);
+  if (!sanitized) return "";
+  return t(lang, `Reason: ${sanitized}`, `理由: ${sanitized}`);
+};
+
+const formatExpectedImpactLine = (lang: string | null | undefined, expectedImpact?: string) => {
+  if (!expectedImpact) return "";
+  const sanitized = sanitizeSingleLine(expectedImpact, 180);
+  if (!sanitized) return "";
+  return t(lang, `Expected impact: ${sanitized}`, `想定影響: ${sanitized}`);
+};
+
+const formatAskMessage = (lang: string | null | undefined, step: AgentStep) => {
+  if (step.type !== "ask") return "";
+  const lines: string[] = [];
+  lines.push(step.question);
+  if (step.options && step.options.length > 0) {
+    const items = step.options
+      .map((option) => sanitizeSingleLine(option, 80))
+      .filter((option) => option.length > 0)
+      .slice(0, 8);
+    if (items.length > 0) {
+      lines.push(...items.map((option, index) => `• ${index + 1}. ${option}`));
+      lines.push(
+        t(
+          lang,
+          "Reply with the option number or the exact name.",
+          "番号または正確な名前で答えてください。"
+        )
+      );
+    }
+  }
+  return lines.join("\n");
 };
 
 const normalizeActionsFromStep = (step: AgentStep): PlannedAction[] => {
@@ -347,16 +397,49 @@ const truncateSummary = (summary: string, maxChars: number) => {
   return summary.slice(0, Math.max(0, maxChars - 3)) + "...";
 };
 
-const buildMessages = async (message: Message, lang: string | null | undefined, initialSummary?: string | null) => {
+type PromptContext = {
+  authorized?: boolean;
+  settings?: {
+    confirmation_mode?: string | null;
+    rate_limit_per_min?: number | null;
+    manager_role_id?: string | null;
+    thread_policy?: string | null;
+  };
+};
+
+const buildMessages = async (
+  message: Message,
+  lang: string | null | undefined,
+  initialSummary?: string | null,
+  context?: PromptContext,
+  override?: { messageId: string; content: string }
+) => {
   const thread = message.channel as ThreadChannel;
   const fetched = await thread.messages.fetch({ limit: 60 });
   const sorted = Array.from(fetched.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
   const normalizedSummary = initialSummary ? initialSummary.trim() : "";
   const summaryText = normalizedSummary.length > 0 ? truncateSummary(normalizedSummary, 800) : "";
+  const contextLines: string[] = [];
+  if (typeof context?.authorized === "boolean") {
+    contextLines.push(`User authorized: ${context.authorized ? "yes" : "no"}`);
+  }
+  if (context?.settings) {
+    if (context.settings.confirmation_mode) {
+      contextLines.push(`Confirmation mode: ${context.settings.confirmation_mode}`);
+    }
+    if (typeof context.settings.rate_limit_per_min === "number") {
+      contextLines.push(`Rate limit per min: ${context.settings.rate_limit_per_min}`);
+    }
+    contextLines.push(`Manager role set: ${context.settings.manager_role_id ? "yes" : "no"}`);
+    if (context.settings.thread_policy) {
+      contextLines.push(`Thread policy: ${context.settings.thread_policy}`);
+    }
+  }
+  const contextText = contextLines.length > 0 ? `Context:\n- ${contextLines.join("\n- ")}` : "";
   const systemContent = normalizedSummary.length > 0
-    ? `${buildSystemPrompt(lang)}\n${t(lang, "Memory summary", "メモリ要約")}: ${summaryText}`
-    : buildSystemPrompt(lang);
+    ? `${buildSystemPrompt(lang)}\n${t(lang, "Memory summary", "メモリ要約")}: ${summaryText}${contextText ? `\n${contextText}` : ""}`
+    : `${buildSystemPrompt(lang)}${contextText ? `\n${contextText}` : ""}`;
   const system = { role: "system" as const, content: systemContent };
   const budget = Math.max(2000, MAX_CONTEXT_CHARS - systemContent.length);
   const selected: Message[] = [];
@@ -386,14 +469,21 @@ const buildMessages = async (message: Message, lang: string | null | undefined, 
   }
 
   selected.reverse();
-  const history = selected.map((msg) => ({
-    role: msg.author.bot ? ("assistant" as const) : ("user" as const),
-    content: msg.content && msg.content.trim().length > 0
-      ? msg.content
-      : msg.attachments.size > 0
-        ? t(lang, "[attachments omitted]", "[添付は省略]")
-        : ""
-  }));
+  const history = selected.map((msg) => {
+    const overrideContent =
+      override && msg.id === override.messageId && !msg.author.bot
+        ? override.content
+        : undefined;
+    const contentSource = overrideContent ?? msg.content ?? "";
+    return {
+      role: msg.author.bot ? ("assistant" as const) : ("user" as const),
+      content: contentSource && contentSource.trim().length > 0
+        ? contentSource
+        : msg.attachments.size > 0
+          ? t(lang, "[attachments omitted]", "[添付は省略]")
+          : ""
+    };
+  });
 
   return [system, ...history];
 };
@@ -403,6 +493,7 @@ const OBSERVATION_ACTIONS = new Set([
   "list_threads",
   "list_channels",
   "get_channel_details",
+  "get_permission_overwrites",
   "list_roles",
   "get_role_details",
   "get_guild_permissions",
@@ -531,6 +622,33 @@ const buildObservationMemoryAppend = (
         `メンバー詳細: ${member.tag ?? "?"}(${member.id})`
       );
     }
+    case "get_permission_overwrites": {
+      const data = result.data as {
+        channelId?: string;
+        channelName?: string;
+        overwrites?: Array<{ id?: string; type?: string; name?: string | null; allow?: string[]; deny?: string[] }>;
+      };
+      const overwrites = data?.overwrites;
+      if (!Array.isArray(overwrites) || overwrites.length === 0) return null;
+      const channelLabel = data.channelName
+        ? `#${data.channelName}`
+        : data.channelId
+          ? `#${data.channelId}`
+          : t(lang, "(channel)", "(チャンネル)");
+      const samples = overwrites.slice(0, 4).map((item) => {
+        const label = item.name ?? item.id ?? "?";
+        const allow = Array.isArray(item.allow) ? item.allow.slice(0, 3).join(",") : "";
+        const deny = Array.isArray(item.deny) ? item.deny.slice(0, 3).join(",") : "";
+        const allowText = allow ? `allow=${allow}` : "";
+        const denyText = deny ? `deny=${deny}` : "";
+        return `${item.type ?? "role"} ${label}${allowText ? ` ${allowText}` : ""}${denyText ? ` ${denyText}` : ""}`;
+      });
+      return t(
+        lang,
+        `Observed overwrites ${channelLabel}: ${samples.join("; ")}`,
+        `観測した権限上書き ${channelLabel}: ${samples.join("; ")}`
+      );
+    }
     default:
       return null;
   }
@@ -557,14 +675,66 @@ const buildToolResultMessage = (action: PlannedAction, result: { ok: boolean; me
   ].join("\n");
 };
 
+const extractNumericSelection = (raw: string) => {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const match = trimmed.match(/^(\d{1,2})\s*(?:\.)?\s*(?:番|番目)?$/);
+  if (!match) return null;
+  const num = Number(match[1]);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return num;
+};
+
+const parseOptionsFromMessage = (content: string) => {
+  const options = new Map<number, string>();
+  const lines = content.split(/\r?\n/);
+  for (const line of lines) {
+    const match = line.match(/^•\s*(\d{1,2})\.\s*(.+)$/);
+    if (!match) continue;
+    const index = Number(match[1]);
+    if (!Number.isFinite(index) || index <= 0) continue;
+    const label = match[2].trim();
+    if (!label) continue;
+    options.set(index, label);
+  }
+  return options;
+};
+
+const resolveNumericSelection = async (message: Message) => {
+  const selection = extractNumericSelection(message.content);
+  if (!selection) return null;
+  try {
+    const thread = message.channel as ThreadChannel;
+    const fetched = await thread.messages.fetch({ limit: 20 });
+    const sorted = Array.from(fetched.values()).sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+    for (const msg of sorted) {
+      if (!msg.author.bot) continue;
+      if (msg.createdTimestamp >= message.createdTimestamp) continue;
+      if (!msg.content || msg.content.trim().length === 0) continue;
+      const options = parseOptionsFromMessage(msg.content);
+      if (options.size === 0) continue;
+      const resolved = options.get(selection);
+      if (resolved) return resolved;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
 const inferObservationFallback = (action: PlannedAction, userText: string): PlannedAction | null => {
   const text = userText.toLowerCase();
   const wantsVoice = text.includes("ボイス") || text.includes("voice") || /\bvc\b/.test(text) || /vc\d+/.test(text);
+  const params = (action.params as Record<string, unknown> | undefined) ?? {};
+  const getString = (key: string) => (typeof params[key] === "string" ? (params[key] as string) : undefined);
+  const hasChannelRef = Boolean(getString("channel_id") || getString("channel_name"));
+  const hasParentRef = Boolean(getString("parent_id") || getString("category_id") || getString("parent_name") || getString("category_name"));
+  const hasRoleRef = Boolean(getString("role_id") || getString("role_name"));
+  const hasUserRef = Boolean(getString("user_id") || getString("user_mention") || getString("member_id"));
+  const userQuery = getString("query") ?? getString("user_name") ?? getString("user_tag");
 
   if (["rename_channel", "delete_channel", "get_channel_details"].includes(action.action)) {
-    const channelId = (action.params as Record<string, unknown> | undefined)?.channel_id;
-    const channelName = (action.params as Record<string, unknown> | undefined)?.channel_name;
-    if (!channelId && !channelName) {
+    if (!hasChannelRef) {
       return {
         action: "list_channels",
         params: { type: wantsVoice ? "voice" : "any", limit: 25 },
@@ -574,37 +744,39 @@ const inferObservationFallback = (action: PlannedAction, userText: string): Plan
   }
 
   if (action.action === "move_channel") {
-    const params = (action.params as Record<string, unknown> | undefined) ?? {};
-    const channelId = params.channel_id;
-    const channelName = params.channel_name;
-    const parentId = params.parent_id ?? params.category_id;
-    const parentName = params.parent_name ?? params.category_name;
-    if (!channelId && !channelName) {
+    if (!hasChannelRef) {
       return { action: "list_channels", params: { type: "any", limit: 25 }, destructive: false };
     }
-    if (!parentId && !parentName) {
+    if (!hasParentRef) {
       return { action: "list_channels", params: { type: "category", limit: 25 }, destructive: false };
     }
   }
 
   if (["assign_role", "remove_role", "get_role_details", "delete_role"].includes(action.action)) {
-    const roleId = (action.params as Record<string, unknown> | undefined)?.role_id;
-    const roleName = (action.params as Record<string, unknown> | undefined)?.role_name;
-    if (!roleId && !roleName) {
+    if (!hasRoleRef) {
       return { action: "list_roles", params: {}, destructive: false };
     }
   }
 
   if (action.action === "update_permission_overwrites") {
-    const channelId = (action.params as Record<string, unknown> | undefined)?.channel_id;
-    const channelName = (action.params as Record<string, unknown> | undefined)?.channel_name;
-    if (!channelId && !channelName) {
+    if (!hasChannelRef) {
+      return { action: "list_channels", params: { type: "any", limit: 25 }, destructive: false };
+    }
+    if (!hasRoleRef && !hasUserRef) {
+      if (userQuery) {
+        return { action: "find_members", params: { query: userQuery, limit: 5 }, destructive: false };
+      }
+      return { action: "list_roles", params: {}, destructive: false };
+    }
+  }
+
+  if (action.action === "get_permission_overwrites") {
+    if (!hasChannelRef) {
       return { action: "list_channels", params: { type: "any", limit: 25 }, destructive: false };
     }
   }
 
   if (["delete_thread", "delete_threads"].includes(action.action)) {
-    const params = (action.params as Record<string, unknown> | undefined) ?? {};
     const threadId = params.thread_id ?? params.thread_mention ?? params.id;
     const threadIds = params.thread_ids ?? params.ids;
     const name = params.thread_name ?? params.name;
@@ -613,6 +785,15 @@ const inferObservationFallback = (action: PlannedAction, userText: string): Plan
         ? "discord-ai |"
         : undefined;
       return { action: "list_threads", params: { ...(prefix ? { prefix } : {}), limit: 25 }, destructive: false };
+    }
+  }
+
+  if (["assign_role", "remove_role", "kick_member", "ban_member", "timeout_member", "untimeout_member", "get_member_details"].includes(action.action)) {
+    if (!hasUserRef) {
+      if (userQuery) {
+        return { action: "find_members", params: { query: userQuery, limit: 5 }, destructive: false };
+      }
+      return { action: "list_members", params: { limit: 10 }, destructive: false };
     }
   }
 
@@ -654,7 +835,9 @@ export const handleThreadMessage = async (message: Message) => {
     return;
   }
 
-  const summaryLine = summarizeUserMessage(message.content, settings.language);
+  const resolvedSelection = await resolveNumericSelection(message);
+  const resolvedContent = resolvedSelection ?? message.content;
+  const summaryLine = summarizeUserMessage(resolvedContent, settings.language);
   if (summaryLine) {
     appendThreadSummary({
       threadId: message.channel.id,
@@ -788,7 +971,21 @@ export const handleThreadMessage = async (message: Message) => {
     model
   });
 
-  const agentMessages = await buildMessages(message, settings.language, threadState?.summary ?? null);
+  const agentMessages = await buildMessages(
+    message,
+    settings.language,
+    threadState?.summary ?? null,
+    {
+      authorized,
+      settings: {
+        confirmation_mode: settings.confirmation_mode,
+        rate_limit_per_min: settings.rate_limit_per_min,
+        manager_role_id: settings.manager_role_id,
+        thread_policy: settings.thread_policy
+      }
+    },
+    resolvedSelection ? { messageId: message.id, content: resolvedContent } : undefined
+  );
   const planFallbackReply = t(
     settings.language,
     "I couldn't complete that. Please clarify what you want to do (e.g., list members, create a channel).",
@@ -834,6 +1031,19 @@ export const handleThreadMessage = async (message: Message) => {
   }
 
   const actionSummaries: string[] = [];
+  const seenObservations = new Set<string>();
+  let lastStepExecuted: "observe" | "act" | null = null;
+  const repeatedObservationReply = t(
+    settings.language,
+    "I checked the same information again but still can't decide. Please clarify the target (name or criteria).",
+    "同じ情報を再確認しましたが、対象を特定できませんでした。対象名や条件をもう少し教えてください。"
+  );
+  const trackObservation = (observation: PlannedAction, allowRepeat: boolean) => {
+    const key = `${observation.action}:${JSON.stringify(observation.params ?? {})}`;
+    if (seenObservations.has(key)) return allowRepeat;
+    seenObservations.add(key);
+    return true;
+  };
   for (let step = 0; step < MAX_AGENT_STEPS; step += 1) {
     let agentStep: AgentStep;
     try {
@@ -863,7 +1073,8 @@ export const handleThreadMessage = async (message: Message) => {
 
     if (agentStep.type === "ask") {
       const prefix = actionSummaries.length > 0 ? `${actionSummaries.join("\n")}\n` : "";
-      await message.reply(`${prefix}${agentStep.question}`);
+      const askMessage = formatAskMessage(settings.language, agentStep);
+      await message.reply(`${prefix}${askMessage}`);
       return;
     }
 
@@ -879,6 +1090,12 @@ export const handleThreadMessage = async (message: Message) => {
         params: agentStep.params ?? {},
         destructive: false
       };
+
+      if (!trackObservation(observationAction, lastStepExecuted === "act")) {
+        const prefix = actionSummaries.length > 0 ? `${actionSummaries.join("\n")}\n` : "";
+        await message.reply(`${prefix}${repeatedObservationReply}`);
+        return;
+      }
 
       if (!checkRateLimit(guildId, settings.rate_limit_per_min)) {
         await message.reply(t(settings.language, "Rate limit exceeded. Try again later.", "レート制限を超えました。少し待ってから再試行してください。"));
@@ -943,6 +1160,7 @@ export const handleThreadMessage = async (message: Message) => {
       }
 
       agentMessages.push({ role: "assistant" as const, content: buildToolResultMessage(observationAction, result) });
+      lastStepExecuted = "observe";
       continue;
     }
 
@@ -1024,12 +1242,17 @@ export const handleThreadMessage = async (message: Message) => {
       return;
     }
     const explicitObservation = actions.find((action) => isObservationAction(action.action));
-    const fallbackObservation = inferObservationFallback(actions[0], message.content);
+    const fallbackObservation = inferObservationFallback(actions[0], resolvedContent);
     const observationAction = isObservationAction(actions[0].action)
       ? actions[0]
       : fallbackObservation ?? (destructiveActions.length > 0 ? explicitObservation ?? null : null);
 
     if (observationAction) {
+      if (!trackObservation(observationAction, lastStepExecuted === "act")) {
+        const prefix = actionSummaries.length > 0 ? `${actionSummaries.join("\n")}\n` : "";
+        await message.reply(`${prefix}${repeatedObservationReply}`);
+        return;
+      }
       if (!checkRateLimit(guildId, settings.rate_limit_per_min)) {
         await message.reply(t(settings.language, "Rate limit exceeded. Try again later.", "レート制限を超えました。少し待ってから再試行してください。"));
         await notifyError({
@@ -1093,6 +1316,7 @@ export const handleThreadMessage = async (message: Message) => {
       }
 
       agentMessages.push({ role: "assistant" as const, content: buildToolResultMessage(observationAction, result) });
+      lastStepExecuted = "observe";
       continue;
     }
 
@@ -1171,7 +1395,14 @@ export const handleThreadMessage = async (message: Message) => {
       const prefaceRaw = agentStep.type === "act" && agentStep.reply ? agentStep.reply : "";
       const preface = sanitizeConfirmationPreface(prefaceRaw, settings.language);
       await message.reply({
-        content: buildDestructiveConfirmationMessage(settings.language, preface, actions, impact),
+        content: buildDestructiveConfirmationMessage(
+          settings.language,
+          preface,
+          actions,
+          impact,
+          agentStep.type === "act" ? agentStep.reason : undefined,
+          agentStep.type === "act" ? agentStep.expected_impact : undefined
+        ),
         components: [confirmationRow(audit.id)]
       });
       return;
@@ -1281,6 +1512,7 @@ export const handleThreadMessage = async (message: Message) => {
       }
     }
 
+    lastStepExecuted = "act";
     continue;
   }
 

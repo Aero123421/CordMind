@@ -1,17 +1,6 @@
 # AGENT.md
 
-## 目的
-このリポジトリで作業するAIエージェントが、docs/plan/00-index.md と配下の計画書に基づき一貫した改善/実装を行う。
 
-## まず読む
-- docs/plan/00-index.md
-
-## 作業原則
-- 事実と仮説を区別し、疑義があれば質問する。
-- 重大な前提変更があれば docs/plan/ を更新する。
-- スコープ外の作業は実行前に確認する。
-- ユーザー向け文面の言語（英/日）を崩さない。
-- destructive は必ず human approval、禁止事項はハード拒否。
 
 ## 技術スタック
 - 言語/フレームワーク: Node.js（最新 LTS）/ TypeScript / discord.js v14

@@ -1,0 +1,10 @@
+{
+  "id": "example-ja-001",
+  "lang": "ja",
+  "messages": [
+    { "role": "user", "content": "@Bot VC を作って" },
+    { "role": "assistant", "content": "対象を選んでください\n• 1. voice-room\n• 2. vc-雑談" },
+    { "role": "user", "content": "1" },
+    { "role": "assistant", "content": "voice-room を作成します" }
+  ]
+}

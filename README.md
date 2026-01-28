@@ -140,6 +140,20 @@ Go back to your Discord server.
 
 ---
 
+## 🧪 Evals (Regression Checks)
+
+Lightweight heuristics to catch common regressions (ID requests, JSON leaks, language drift, missing confirmations).
+
+```bash
+npm run evals
+# strict mode (fail on any issue)
+npm run evals -- --strict
+```
+
+Fixtures live under `evals/fixtures/*.json`.
+
+---
+
 <div align="center">
 Created with ❤️ for Discord Admins
 </div>

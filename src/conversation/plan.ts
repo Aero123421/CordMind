@@ -114,20 +114,31 @@ export const generateToolPlan = async (
 };
 
 export type AgentStep =
-  | { type: "observe"; action: string; params?: Record<string, unknown> }
-  | { type: "act"; actions: PlannedAction[]; reply?: string }
-  | { type: "ask"; question: string }
-  | { type: "finish"; reply: string };
+  | { type: "observe"; action: string; params?: Record<string, unknown>; reason?: string }
+  | { type: "act"; actions: PlannedAction[]; reply?: string; reason?: string; expected_impact?: string }
+  | { type: "ask"; question: string; options?: string[]; reason?: string }
+  | { type: "finish"; reply: string; reason?: string };
 
 const normalizeAgentStep = (input: unknown, fallbackReply: string): AgentStep => {
   const fallback: AgentStep = { type: "finish", reply: fallbackReply };
   if (!input || typeof input !== "object" || Array.isArray(input)) return fallback;
   const obj = input as Record<string, unknown>;
   const type = typeof obj.type === "string" ? obj.type : "";
+  const reason = typeof obj.reason === "string" && obj.reason.trim().length > 0 ? obj.reason.trim() : undefined;
+  const expectedImpact =
+    typeof obj.expected_impact === "string" && obj.expected_impact.trim().length > 0 ? obj.expected_impact.trim() : undefined;
+  const options = Array.isArray(obj.options)
+    ? obj.options.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 10)
+    : undefined;
 
   if (type === "ask") {
     const question = typeof obj.question === "string" && obj.question.trim().length > 0 ? obj.question : fallbackReply;
-    return { type: "ask", question };
+    return {
+      type: "ask",
+      question,
+      ...(options && options.length > 0 ? { options } : {}),
+      ...(reason ? { reason } : {})
+    };
   }
 
   if (type === "observe") {
@@ -136,7 +147,7 @@ const normalizeAgentStep = (input: unknown, fallbackReply: string): AgentStep =>
       obj.params && typeof obj.params === "object" && !Array.isArray(obj.params)
         ? (obj.params as Record<string, unknown>)
         : {};
-    return { type: "observe", action, params };
+    return { type: "observe", action, params, ...(reason ? { reason } : {}) };
   }
 
   if (type === "act") {
@@ -167,12 +178,18 @@ const normalizeAgentStep = (input: unknown, fallbackReply: string): AgentStep =>
 
     const normalized = actions.length > 0 ? actions : fallbackAction ? [fallbackAction] : [];
     const reply = typeof obj.reply === "string" ? obj.reply : undefined;
-    return { type: "act", actions: normalized, reply };
+    return {
+      type: "act",
+      actions: normalized,
+      ...(reply ? { reply } : {}),
+      ...(reason ? { reason } : {}),
+      ...(expectedImpact ? { expected_impact: expectedImpact } : {})
+    };
   }
 
   if (type === "finish") {
     const reply = typeof obj.reply === "string" && obj.reply.trim().length > 0 ? obj.reply : fallbackReply;
-    return { type: "finish", reply };
+    return { type: "finish", reply, ...(reason ? { reason } : {}) };
   }
 
   return fallback;

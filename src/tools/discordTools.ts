@@ -2,6 +2,7 @@ import {
   ChannelType,
   Guild,
   GuildMember,
+  OverwriteType,
   PermissionsBitField,
   Role,
   type AnyThreadChannel,
@@ -748,6 +749,96 @@ export const removeRole: ToolHandler = async (context, params) => {
     t(context.lang, `Role ${role.name} removed from ${member.user.tag}.`, `${member.user.tag} からロール ${role.name} を剥奪しました。`),
     [member.id, role.id],
     { memberId: member.id, roleId: role.id, roleName: role.name }
+  );
+};
+
+export const getPermissionOverwrites: ToolHandler = async (context, params) => {
+  const channel = await resolveChannel(
+    context.guild,
+    params.channel_id as string | undefined,
+    params.channel_name as string | undefined
+  );
+  if (!channel || !("permissionOverwrites" in channel)) {
+    return fail(t(context.lang, "Channel not found or unsupported.", "チャンネルが見つからないか、権限の参照に対応していません。"));
+  }
+
+  const hasRoleParam = Boolean(params.role_id || params.role_name);
+  const hasUserParam = Boolean(params.user_id || params.user_mention || params.member_id || params.query || params.user_name || params.user_tag);
+
+  let targetRole: Role | null = null;
+  let targetUser: GuildMember | null = null;
+
+  if (hasRoleParam) {
+    targetRole = await resolveRole(
+      context.guild,
+      extractRoleId(params.role_id) ?? (params.role_id as string | undefined),
+      params.role_name as string | undefined
+    );
+    if (!targetRole) {
+      return fail(t(context.lang, "Role not found.", "ロールが見つかりませんでした。"));
+    }
+  } else if (hasUserParam) {
+    const resolved = await resolveMemberFromParams(context.guild, params, context.lang);
+    if (!resolved.ok) return fail(resolved.message);
+    targetUser = resolved.member;
+  }
+
+  const overwrites = Array.from(channel.permissionOverwrites.cache.values());
+  const filtered = targetRole
+    ? overwrites.filter((item) => item.id === targetRole!.id)
+    : targetUser
+      ? overwrites.filter((item) => item.id === targetUser!.id)
+      : overwrites;
+
+  const limited = filtered.slice(0, 20);
+  if (limited.length === 0) {
+    return ok(
+      t(context.lang, "No permission overwrites found.", "権限の上書きは見つかりませんでした。"),
+      [],
+      { channelId: channel.id, overwrites: [] }
+    );
+  }
+
+  const roles = await context.guild.roles.fetch();
+  const memberIds = limited.filter((item) => item.type === OverwriteType.Member).map((item) => item.id);
+  const members = await Promise.all(memberIds.map((id) => resolveMemberById(context.guild, id)));
+  const memberMap = new Map<string, string>();
+  members.forEach((member) => {
+    if (!member) return;
+    memberMap.set(member.id, member.user.tag);
+  });
+
+  const data = limited.map((item) => {
+    const allow = item.allow.toArray();
+    const deny = item.deny.toArray();
+    const isRole = item.type === OverwriteType.Role;
+    const name = isRole
+      ? item.id === context.guild.id
+        ? "@everyone"
+        : roles.get(item.id)?.name ?? null
+      : memberMap.get(item.id) ?? null;
+    return {
+      id: item.id,
+      type: isRole ? "role" : "member",
+      name,
+      allow,
+      deny
+    };
+  });
+
+  const list = data
+    .map((item) => {
+      const label = item.name ?? item.id;
+      const allowText = item.allow.length > 0 ? `allow=[${item.allow.join(", ")}]` : "allow=[]";
+      const denyText = item.deny.length > 0 ? `deny=[${item.deny.join(", ")}]` : "deny=[]";
+      return `${item.type} ${label}: ${allowText} ${denyText}`;
+    })
+    .join("\n");
+
+  return ok(
+    t(context.lang, `Permission overwrites:\n${list}`, `権限上書き:\n${list}`),
+    data.map((item) => item.id),
+    { channelId: channel.id, channelName: channel.name, overwrites: data }
   );
 };
 
